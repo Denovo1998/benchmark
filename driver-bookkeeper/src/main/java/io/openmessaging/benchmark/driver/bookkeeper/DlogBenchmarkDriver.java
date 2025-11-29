@@ -22,6 +22,7 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.bookkeeper.stats.StatsLoggerAdaptor;
 import java.io.File;
 import java.io.IOException;
@@ -102,7 +103,8 @@ public class DlogBenchmarkDriver implements BenchmarkDriver {
     }
 
     @Override
-    public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
+    public CompletableFuture<BenchmarkProducer> createProducer(
+            String topic, ProducerOptions options) {
         return CompletableFuture.supplyAsync(
                         () -> {
                             try {

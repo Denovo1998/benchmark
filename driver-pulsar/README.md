@@ -2,6 +2,16 @@
 
 For instructions on running the OpenMessaging benchmarks for Pulsar, see the [official documentation](http://openmessaging.cloud/docs/benchmarks/pulsar/).
 
+## Delayed message benchmarks
+
+This fork adds simple support for Pulsar broker-side delayed delivery. To run a delayed-message benchmark:
+
+- Use the delayed driver config, for example: `driver-pulsar/pulsar-delayed-5s.yaml` (all produced messages are delivered 5 seconds later).
+- Or set `producer.messageDelayMs` in any existing Pulsar driver YAML (e.g. `driver-pulsar/pulsar.yaml`) to a value greater than 0.
+- Then choose a workload YAML (for example `workloads/pulsar-delayed-1-topic-16-partitions-1kb.yaml`) and run the benchmark as usual.
+
+End-to-end latency metrics will include the configured delivery delay.
+
 ## Supplement to the official documentation
 
 Before you run `ansible-playbook` with `terraform-inventory`, you must set the environment variable `TF_STATE`. i.e. the completed command should be:

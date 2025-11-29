@@ -24,6 +24,7 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarClientConfig.PersistenceConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
 import java.io.File;
@@ -194,8 +195,14 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     }
 
     @Override
-    public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
-        return producerBuilder.topic(topic).createAsync().thenApply(PulsarBenchmarkProducer::new);
+    public CompletableFuture<BenchmarkProducer> createProducer(
+            String topic, ProducerOptions options) {
+        long messageDelayMs =
+                options.messageDelayMs > 0 ? options.messageDelayMs : config.producer.messageDelayMs;
+        return producerBuilder
+                .topic(topic)
+                .createAsync()
+                .thenApply(p -> new PulsarBenchmarkProducer(p, messageDelayMs));
     }
 
     @Override

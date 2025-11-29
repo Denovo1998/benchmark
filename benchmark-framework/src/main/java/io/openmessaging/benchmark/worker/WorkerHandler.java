@@ -20,6 +20,7 @@ import com.google.common.io.Files;
 import io.javalin.Context;
 import io.javalin.Javalin;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
+import io.openmessaging.benchmark.worker.commands.CreateProducersRequest;
 import io.openmessaging.benchmark.worker.commands.ProducerWorkAssignment;
 import io.openmessaging.benchmark.worker.commands.TopicsInfo;
 import io.openmessaging.benchmark.worker.jackson.ObjectMappers;
@@ -84,9 +85,9 @@ public class WorkerHandler {
     }
 
     private void handleCreateProducers(Context ctx) throws Exception {
-        List<String> topics = (List<String>) mapper.readValue(ctx.body(), List.class);
-        log.info("Received create producers request for topics: {}", topics);
-        localWorker.createProducers(topics);
+        CreateProducersRequest request = mapper.readValue(ctx.body(), CreateProducersRequest.class);
+        log.info("Received create producers request for topics: {}", request.topics);
+        localWorker.createProducers(request.topics, request.workload);
     }
 
     private void handleProbeProducers(Context ctx) throws Exception {

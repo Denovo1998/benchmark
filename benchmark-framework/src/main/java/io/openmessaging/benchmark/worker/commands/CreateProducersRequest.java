@@ -11,14 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.openmessaging.benchmark.driver.pulsar.config;
+package io.openmessaging.benchmark.worker.commands;
 
-public class PulsarProducerConfig {
-    public boolean batchingEnabled = true;
-    public int batchingMaxPublishDelayMs = 1;
-    public int batchingMaxBytes = 1024 * 1024;
-    public boolean blockIfQueueFull = true;
-    public int pendingQueueSize = 0;
-    /** Fixed broker-side delivery delay for all messages, in milliseconds. */
-    public long messageDelayMs = 0;
+
+import io.openmessaging.benchmark.Workload;
+import java.util.List;
+
+public class CreateProducersRequest {
+    public List<String> topics;
+    public Workload workload;
+
+    public CreateProducersRequest() {}
+
+    public CreateProducersRequest(List<String> topics, Workload workload) {
+        this.topics = topics;
+        this.workload = workload;
+    }
 }

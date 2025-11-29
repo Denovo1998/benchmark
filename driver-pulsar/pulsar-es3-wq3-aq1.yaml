@@ -42,6 +42,9 @@ producer:
   batchingMaxPublishDelayMs: 1
   blockIfQueueFull: true
   pendingQueueSize: 10000
+  # Fixed broker-side delivery delay for all messages produced by this driver (milliseconds).
+  # Set to 0 for immediate delivery.
+  messageDelayMs: 0
 
 # Consumer configuration
 

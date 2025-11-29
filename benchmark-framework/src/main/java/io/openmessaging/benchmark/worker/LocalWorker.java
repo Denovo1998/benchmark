@@ -22,6 +22,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.common.base.Preconditions;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import io.openmessaging.benchmark.DriverConfiguration;
+import io.openmessaging.benchmark.Workload;
 import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkDriver.ConsumerInfo;
@@ -29,6 +30,7 @@ import io.openmessaging.benchmark.driver.BenchmarkDriver.ProducerInfo;
 import io.openmessaging.benchmark.driver.BenchmarkDriver.TopicInfo;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.utils.RandomGenerator;
 import io.openmessaging.benchmark.utils.Timer;
 import io.openmessaging.benchmark.utils.UniformRateLimiter;
@@ -125,16 +127,20 @@ public class LocalWorker implements Worker, ConsumerCallback {
     }
 
     @Override
-    public void createProducers(List<String> topics) {
+    public void createProducers(List<String> topics, Workload workload) {
         Timer timer = new Timer();
         AtomicInteger index = new AtomicInteger();
+
+        ProducerOptions options = new ProducerOptions();
+        options.messageDelayMs = workload.messageDelayMs;
 
         producers.addAll(
                 benchmarkDriver
                         .createProducers(
                                 topics.stream()
                                         .map(t -> new ProducerInfo(index.getAndIncrement(), t))
-                                        .collect(toList()))
+                                        .collect(toList()),
+                                options)
                         .join());
 
         log.info("Created {} producers in {} ms", producers.size(), timer.elapsedMillis());

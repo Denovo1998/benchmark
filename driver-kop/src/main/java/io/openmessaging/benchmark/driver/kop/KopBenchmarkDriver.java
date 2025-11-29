@@ -21,6 +21,7 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkConsumer;
 import io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkProducer;
 import io.openmessaging.benchmark.driver.kop.config.ClientType;
@@ -147,7 +148,8 @@ public class KopBenchmarkDriver implements BenchmarkDriver {
     }
 
     @Override
-    public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
+    public CompletableFuture<BenchmarkProducer> createProducer(
+            String topic, ProducerOptions options) {
         if (config.producerType.equals(ClientType.KAFKA)) {
             final BenchmarkProducer producer =
                     new KafkaBenchmarkProducer(new KafkaProducer<>(producerProperties), topic);
@@ -158,7 +160,7 @@ public class KopBenchmarkDriver implements BenchmarkDriver {
                     .clone()
                     .topic(topic)
                     .createAsync()
-                    .thenApply(PulsarBenchmarkProducer::new);
+                    .thenApply(producer -> new PulsarBenchmarkProducer(producer, 0L));
         } else {
             throw new IllegalArgumentException("producerType " + config.producerType + " is invalid");
         }

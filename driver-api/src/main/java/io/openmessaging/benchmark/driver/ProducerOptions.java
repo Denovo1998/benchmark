@@ -11,14 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package io.openmessaging.benchmark.driver.pulsar.config;
+package io.openmessaging.benchmark.driver;
 
-public class PulsarProducerConfig {
-    public boolean batchingEnabled = true;
-    public int batchingMaxPublishDelayMs = 1;
-    public int batchingMaxBytes = 1024 * 1024;
-    public boolean blockIfQueueFull = true;
-    public int pendingQueueSize = 0;
-    /** Fixed broker-side delivery delay for all messages, in milliseconds. */
+public class ProducerOptions {
     public long messageDelayMs = 0;
+
+    @Override
+    public String toString() {
+        return "ProducerOptions{" + "messageDelayMs=" + messageDelayMs + '}';
+    }
 }

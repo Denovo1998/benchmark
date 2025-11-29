@@ -14,6 +14,7 @@
 package io.openmessaging.benchmark.worker;
 
 
+import io.openmessaging.benchmark.Workload;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
@@ -30,7 +31,7 @@ public interface Worker extends AutoCloseable {
 
     List<String> createTopics(TopicsInfo topicsInfo) throws IOException;
 
-    void createProducers(List<String> topics) throws IOException;
+    void createProducers(List<String> topics, Workload workload) throws IOException;
 
     void createConsumers(ConsumerAssignment consumerAssignment) throws IOException;
 

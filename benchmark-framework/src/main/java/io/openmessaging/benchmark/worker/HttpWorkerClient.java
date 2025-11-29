@@ -32,8 +32,10 @@ import static org.asynchttpclient.Dsl.asyncHttpClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.google.common.base.Preconditions;
+import io.openmessaging.benchmark.Workload;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
+import io.openmessaging.benchmark.worker.commands.CreateProducersRequest;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
 import io.openmessaging.benchmark.worker.commands.PeriodStats;
 import io.openmessaging.benchmark.worker.commands.ProducerWorkAssignment;
@@ -79,8 +81,9 @@ public class HttpWorkerClient implements Worker {
     }
 
     @Override
-    public void createProducers(List<String> topics) throws IOException {
-        sendPost(CREATE_PRODUCERS, writer.writeValueAsBytes(topics));
+    public void createProducers(List<String> topics, Workload workload) throws IOException {
+        sendPost(
+                CREATE_PRODUCERS, writer.writeValueAsBytes(new CreateProducersRequest(topics, workload)));
     }
 
     @Override

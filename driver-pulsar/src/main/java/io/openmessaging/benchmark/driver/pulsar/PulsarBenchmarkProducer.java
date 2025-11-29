@@ -17,15 +17,18 @@ package io.openmessaging.benchmark.driver.pulsar;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.apache.pulsar.client.api.Producer;
 import org.apache.pulsar.client.api.TypedMessageBuilder;
 
 public class PulsarBenchmarkProducer implements BenchmarkProducer {
 
     private final Producer<byte[]> producer;
+    private final long messageDelayMs;
 
-    public PulsarBenchmarkProducer(Producer<byte[]> producer) {
+    public PulsarBenchmarkProducer(Producer<byte[]> producer, long messageDelayMs) {
         this.producer = producer;
+        this.messageDelayMs = messageDelayMs;
     }
 
     @Override
@@ -38,6 +41,10 @@ public class PulsarBenchmarkProducer implements BenchmarkProducer {
         TypedMessageBuilder<byte[]> msgBuilder = producer.newMessage().value(payload);
         if (key.isPresent()) {
             msgBuilder.key(key.get());
+        }
+
+        if (messageDelayMs > 0) {
+            msgBuilder.deliverAfter(messageDelayMs, TimeUnit.MILLISECONDS);
         }
 
         return msgBuilder.sendAsync().thenApply(msgId -> null);

@@ -20,6 +20,7 @@ import com.beust.jcommander.internal.Maps;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
+import io.openmessaging.benchmark.Workload;
 import io.openmessaging.benchmark.utils.ListPartition;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
@@ -93,7 +94,7 @@ public class DistributedWorkersEnsemble implements Worker {
     }
 
     @Override
-    public void createProducers(List<String> topics) {
+    public void createProducers(List<String> topics, Workload workload) {
         List<List<String>> topicsPerProducer =
                 ListPartition.partitionList(topics, producerWorkers.size());
         Map<Worker, List<String>> topicsPerProducerMap = Maps.newHashMap();
@@ -111,7 +112,7 @@ public class DistributedWorkersEnsemble implements Worker {
                 .forEach(
                         e -> {
                             try {
-                                e.getKey().createProducers(e.getValue());
+                                e.getKey().createProducers(e.getValue(), workload);
                             } catch (IOException ex) {
                                 throw new RuntimeException(ex);
                             }

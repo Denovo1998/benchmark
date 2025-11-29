@@ -72,9 +72,35 @@ public interface BenchmarkDriver extends AutoCloseable {
      * Create a producer for a given topic.
      *
      * @param topic
-     * @return a producer future
+     * @param options
+     * @return a future for the producer
      */
-    CompletableFuture<BenchmarkProducer> createProducer(String topic);
+    CompletableFuture<BenchmarkProducer> createProducer(String topic, ProducerOptions options);
+
+    /**
+     * Create a producer for a given topic.
+     *
+     * @param topic
+     * @return a future for the producer
+     */
+    default CompletableFuture<BenchmarkProducer> createProducer(String topic) {
+        return createProducer(topic, new ProducerOptions());
+    }
+
+    /**
+     * Create a producers for a given topic.
+     *
+     * @param producers
+     * @param options
+     * @return a producers future
+     */
+    default CompletableFuture<List<BenchmarkProducer>> createProducers(
+            List<ProducerInfo> producers, ProducerOptions options) {
+        List<CompletableFuture<BenchmarkProducer>> futures =
+                producers.stream().map(ci -> createProducer(ci.getTopic(), options)).collect(toList());
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                .thenApply(v -> futures.stream().map(CompletableFuture::join).collect(toList()));
+    }
 
     /**
      * Create a producers for a given topic.
@@ -83,10 +109,7 @@ public interface BenchmarkDriver extends AutoCloseable {
      * @return a producers future
      */
     default CompletableFuture<List<BenchmarkProducer>> createProducers(List<ProducerInfo> producers) {
-        List<CompletableFuture<BenchmarkProducer>> futures =
-                producers.stream().map(ci -> createProducer(ci.getTopic())).collect(toList());
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
-                .thenApply(v -> futures.stream().map(CompletableFuture::join).collect(toList()));
+        return createProducers(producers, new ProducerOptions());
     }
 
     /**

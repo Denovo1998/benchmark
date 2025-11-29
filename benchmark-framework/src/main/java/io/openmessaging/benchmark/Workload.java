@@ -65,4 +65,6 @@ public class Workload {
     public int testDurationMinutes;
 
     public int warmupDurationMinutes = 1;
+
+    public long messageDelayMs = 0;
 }

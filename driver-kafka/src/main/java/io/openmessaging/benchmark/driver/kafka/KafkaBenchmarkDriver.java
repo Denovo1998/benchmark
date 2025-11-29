@@ -21,6 +21,7 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
@@ -115,7 +116,8 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
     }
 
     @Override
-    public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
+    public CompletableFuture<BenchmarkProducer> createProducer(
+            String topic, ProducerOptions options) {
         KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(producerProperties);
         BenchmarkProducer benchmarkProducer = new KafkaBenchmarkProducer(kafkaProducer, topic);
         try {

@@ -12,23 +12,23 @@
 # limitations under the License.
 #
 
-name: Pulsar-effectively-once
+name: Pulsar-delayed-5s
 driverClass: io.openmessaging.benchmark.driver.pulsar.PulsarBenchmarkDriver
 
 # Pulsar client-specific configuration
 client:
   serviceUrl: pulsar://localhost:6650
   httpUrl: http://localhost:8080
-  ioThreads: 4
+  ioThreads: 8
   connectionsPerBroker: 8
-  clusterName: local
+  clusterName: cluster-a
   namespacePrefix: benchmark/ns
   topicType: persistent
   persistence:
-    ensembleSize: 3
-    writeQuorum: 3
-    ackQuorum: 2
-    deduplicationEnabled: true
+    ensembleSize: 1
+    writeQuorum: 1
+    ackQuorum: 1
+    deduplicationEnabled: false
   tlsAllowInsecureConnection: false
   tlsEnableHostnameVerification: false
   tlsTrustCertsFilePath:
@@ -41,9 +41,13 @@ producer:
   batchingEnabled: true
   batchingMaxPublishDelayMs: 1
   blockIfQueueFull: true
-  # Fixed broker-side delivery delay for all messages produced by this driver (milliseconds).
-  # Set to 0 for immediate delivery.
-  messageDelayMs: 0
+  pendingQueueSize: 1000
+  # All messages will be delivered by the broker 5 seconds after being produced.
+  messageDelayMs: 5000
+
+# Consumer configuration
 
 consumer:
-  receiverQueueSize: 10000
+  subscriptionType: Failover
+  subscriptionMode: Durable
+

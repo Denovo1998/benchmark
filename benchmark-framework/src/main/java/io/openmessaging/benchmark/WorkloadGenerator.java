@@ -264,7 +264,7 @@ public class WorkloadGenerator implements AutoCloseable {
 
         Timer timer = new Timer();
 
-        worker.createProducers(fullListOfTopics);
+        worker.createProducers(fullListOfTopics, workload);
         log.info("Created {} producers in {} ms", fullListOfTopics.size(), timer.elapsedMillis());
     }
 
