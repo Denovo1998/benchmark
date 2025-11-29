@@ -200,6 +200,10 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
         ProducerOptions effectiveOptions = new ProducerOptions();
         effectiveOptions.messageDelayMs =
                 options.messageDelayMs > 0 ? options.messageDelayMs : config.producer.messageDelayMs;
+        effectiveOptions.delayMessageRatio =
+                options.delayMessageRatio > 0.0
+                        ? options.delayMessageRatio
+                        : config.producer.delayMessageRatio;
         effectiveOptions.minMessageDelayMs =
                 options.minMessageDelayMs > 0
                         ? options.minMessageDelayMs

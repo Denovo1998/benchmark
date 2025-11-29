@@ -30,6 +30,9 @@ testDurationMinutes: 15
 # it will override the producer-level messageDelayMs configured in the driver.
 # messageDelayMs: 5000
 
+# Optional ratio of messages that will be sent with broker-side delivery delay, between 0.0 and 1.0.
+# delayMessageRatio: 1.0
+
 # Optional per-message random delay range in milliseconds. If maxMessageDelayMs > 0,
 # each message will be delayed by a random value in [minMessageDelayMs, maxMessageDelayMs].
 # minMessageDelayMs: 1000

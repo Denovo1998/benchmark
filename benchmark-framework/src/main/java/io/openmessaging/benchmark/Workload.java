@@ -70,6 +70,15 @@ public class Workload {
     public long messageDelayMs = 0;
 
     /**
+     * Ratio of messages that will be sent with broker-side delivery delay, between 0.0 and 1.0.
+     *
+     * <p>A value of 0.0 means all messages are sent without delay. A value of 1.0 means all
+     * messages are delayed according to {@code messageDelayMs} or the random delay range. Values
+     * outside [0.0, 1.0] are not validated here and may be sanitized by individual drivers.
+     */
+    public double delayMessageRatio = 0.0;
+
+    /**
      * Minimum per-message delivery delay in milliseconds when using a random delay range.
      *
      * <p>If {@code maxMessageDelayMs > 0}, the effective delay for each message will be a random

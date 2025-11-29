@@ -12,7 +12,11 @@ This fork adds simple support for Pulsar broker-side delayed delivery. To run a 
   - `driver-pulsar/pulsar-delayed-10s.yaml` (all produced messages are delivered 10 seconds later)
 - Or set `producer.messageDelayMs` in any existing Pulsar driver YAML (e.g. `driver-pulsar/pulsar.yaml`) to a value greater than 0 for a fixed delay.
 - To use a per-message random delay, set `producer.minMessageDelayMs` and `producer.maxMessageDelayMs` (e.g. `minMessageDelayMs: 1000`, `maxMessageDelayMs: 10000` for a random delay between 1s and 10s). When `maxMessageDelayMs > 0`, the driver will ignore `messageDelayMs` and use a random value in `[minMessageDelayMs, maxMessageDelayMs]` for each message.
-- Workload YAMLs can also override these settings per workload by setting `messageDelayMs`, `minMessageDelayMs` and `maxMessageDelayMs`.
+- To mix delayed and non-delayed messages in a single workload, use `delayMessageRatio`:
+  - `delayMessageRatio: 0.0` (default) means all messages are sent without broker-side delay.
+  - `delayMessageRatio: 0.3` means ~30% of messages will be delayed (according to `messageDelayMs` or the random range) and the rest will be sent immediately.
+  - `delayMessageRatio: 1.0` means all messages are delayed (equivalent to the original delayed-only workloads).
+- Workload YAMLs can also override these settings per workload by setting `messageDelayMs`, `minMessageDelayMs`, `maxMessageDelayMs` and `delayMessageRatio`.
 - Then choose a workload YAML (for example `workloads/pulsar-delayed-1-topic-16-partitions-1kb.yaml`) and run the benchmark as usual.
 
 End-to-end latency metrics will include the configured delivery delay.
@@ -77,4 +81,3 @@ TF_STATE=. ansible-playbook \
   -e @extra_vars.yaml \
   restart-brokers.yaml
 ```
-

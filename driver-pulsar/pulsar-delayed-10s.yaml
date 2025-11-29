@@ -46,10 +46,12 @@ producer:
   messageDelayMs: 10000
   minMessageDelayMs: 0
   maxMessageDelayMs: 0
+  # Ratio of messages that will be sent with broker-side delivery delay.
+  # 1.0 means all messages are delayed, values between 0.0 and 1.0 will delay that fraction.
+  delayMessageRatio: 0.5
 
 # Consumer configuration
 
 consumer:
   subscriptionType: Failover
   subscriptionMode: Durable
-

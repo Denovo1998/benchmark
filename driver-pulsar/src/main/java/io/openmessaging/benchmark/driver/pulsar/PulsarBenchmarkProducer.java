@@ -27,10 +27,12 @@ public class PulsarBenchmarkProducer implements BenchmarkProducer {
 
     private final Producer<byte[]> producer;
     private final ProducerOptions options;
+    private final double delayMessageRatio;
 
     public PulsarBenchmarkProducer(Producer<byte[]> producer, ProducerOptions options) {
         this.producer = producer;
         this.options = options;
+        this.delayMessageRatio = sanitizeDelayMessageRatio(options.delayMessageRatio);
     }
 
     @Override
@@ -46,7 +48,7 @@ public class PulsarBenchmarkProducer implements BenchmarkProducer {
         }
 
         long delayMs = resolveDelayMillis();
-        if (delayMs > 0) {
+        if (delayMs > 0 && shouldApplyDelay()) {
             msgBuilder.deliverAfter(delayMs, TimeUnit.MILLISECONDS);
         }
 
@@ -69,5 +71,25 @@ public class PulsarBenchmarkProducer implements BenchmarkProducer {
         }
 
         return fixed;
+    }
+
+    private static double sanitizeDelayMessageRatio(double ratio) {
+        if (ratio <= 0.0d) {
+            return 0.0d;
+        }
+        if (ratio >= 1.0d) {
+            return 1.0d;
+        }
+        return ratio;
+    }
+
+    private boolean shouldApplyDelay() {
+        if (delayMessageRatio <= 0.0d) {
+            return false;
+        }
+        if (delayMessageRatio >= 1.0d) {
+            return true;
+        }
+        return ThreadLocalRandom.current().nextDouble() < delayMessageRatio;
     }
 }
