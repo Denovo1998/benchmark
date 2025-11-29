@@ -14,10 +14,34 @@
 package io.openmessaging.benchmark.driver;
 
 public class ProducerOptions {
+    /** Fixed broker-side delivery delay for all messages, in milliseconds. */
     public long messageDelayMs = 0;
+
+    /**
+     * Minimum per-message delivery delay in milliseconds when using a random delay range.
+     *
+     * <p>If {@code maxMessageDelayMs > 0}, the effective delay for each message will be a random
+     * value in the range [{@code minMessageDelayMs}, {@code maxMessageDelayMs}].
+     */
+    public long minMessageDelayMs = 0;
+
+    /**
+     * Maximum per-message delivery delay in milliseconds when using a random delay range.
+     *
+     * <p>If this is {@code > 0}, the benchmark will use a random delay in the range [{@code
+     * minMessageDelayMs}, {@code maxMessageDelayMs}] instead of the fixed {@code messageDelayMs}.
+     */
+    public long maxMessageDelayMs = 0;
 
     @Override
     public String toString() {
-        return "ProducerOptions{" + "messageDelayMs=" + messageDelayMs + '}';
+        return "ProducerOptions{"
+                + "messageDelayMs="
+                + messageDelayMs
+                + ", minMessageDelayMs="
+                + minMessageDelayMs
+                + ", maxMessageDelayMs="
+                + maxMessageDelayMs
+                + '}';
     }
 }

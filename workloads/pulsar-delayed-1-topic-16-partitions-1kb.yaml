@@ -26,3 +26,11 @@ producerRate: 5000
 consumerBacklogSizeGB: 0
 testDurationMinutes: 15
 
+# Optional workload-level override for message delay. If set to a value > 0,
+# it will override the producer-level messageDelayMs configured in the driver.
+# messageDelayMs: 5000
+
+# Optional per-message random delay range in milliseconds. If maxMessageDelayMs > 0,
+# each message will be delayed by a random value in [minMessageDelayMs, maxMessageDelayMs].
+# minMessageDelayMs: 1000
+# maxMessageDelayMs: 10000

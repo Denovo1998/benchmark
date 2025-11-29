@@ -12,7 +12,7 @@
 # limitations under the License.
 #
 
-name: Pulsar
+name: Pulsar-delayed-10s
 driverClass: io.openmessaging.benchmark.driver.pulsar.PulsarBenchmarkDriver
 
 # Pulsar client-specific configuration
@@ -42,12 +42,14 @@ producer:
   batchingMaxPublishDelayMs: 1
   blockIfQueueFull: true
   pendingQueueSize: 10000
-  # Fixed broker-side delivery delay for all messages produced by this driver (milliseconds).
-  # Set to 0 for immediate delivery.
-  messageDelayMs: 0
+  # All messages will be delivered by the broker 10 seconds after being produced.
+  messageDelayMs: 10000
+  minMessageDelayMs: 0
+  maxMessageDelayMs: 0
 
 # Consumer configuration
 
 consumer:
   subscriptionType: Failover
   subscriptionMode: Durable
+

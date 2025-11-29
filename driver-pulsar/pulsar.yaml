@@ -46,6 +46,11 @@ producer:
   # Fixed broker-side delivery delay for all messages produced by this driver (milliseconds).
   # Set to 0 for immediate delivery.
   messageDelayMs: 0
+  # Optional per-message random delay range in milliseconds.
+  # If maxMessageDelayMs > 0, each message will be delayed by a random value in
+  # [minMessageDelayMs, maxMessageDelayMs] instead of using messageDelayMs.
+  minMessageDelayMs: 0
+  maxMessageDelayMs: 0
 
 consumer:
   receiverQueueSize: 10000

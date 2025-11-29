@@ -133,6 +133,8 @@ public class LocalWorker implements Worker, ConsumerCallback {
 
         ProducerOptions options = new ProducerOptions();
         options.messageDelayMs = workload.messageDelayMs;
+        options.minMessageDelayMs = workload.minMessageDelayMs;
+        options.maxMessageDelayMs = workload.maxMessageDelayMs;
 
         producers.addAll(
                 benchmarkDriver

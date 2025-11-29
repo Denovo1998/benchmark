@@ -197,12 +197,22 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     @Override
     public CompletableFuture<BenchmarkProducer> createProducer(
             String topic, ProducerOptions options) {
-        long messageDelayMs =
+        ProducerOptions effectiveOptions = new ProducerOptions();
+        effectiveOptions.messageDelayMs =
                 options.messageDelayMs > 0 ? options.messageDelayMs : config.producer.messageDelayMs;
+        effectiveOptions.minMessageDelayMs =
+                options.minMessageDelayMs > 0
+                        ? options.minMessageDelayMs
+                        : config.producer.minMessageDelayMs;
+        effectiveOptions.maxMessageDelayMs =
+                options.maxMessageDelayMs > 0
+                        ? options.maxMessageDelayMs
+                        : config.producer.maxMessageDelayMs;
+
         return producerBuilder
                 .topic(topic)
                 .createAsync()
-                .thenApply(p -> new PulsarBenchmarkProducer(p, messageDelayMs));
+                .thenApply(p -> new PulsarBenchmarkProducer(p, effectiveOptions));
     }
 
     @Override

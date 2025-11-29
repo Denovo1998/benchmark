@@ -156,11 +156,13 @@ public class KopBenchmarkDriver implements BenchmarkDriver {
             producers.add(producer);
             return CompletableFuture.completedFuture(producer);
         } else if (config.consumerType.equals(ClientType.PULSAR)) {
+            ProducerOptions effectiveOptions = new ProducerOptions();
+            // KoP Pulsar producer currently does not use delayed delivery; keep defaults (no delay).
             return producerBuilder
                     .clone()
                     .topic(topic)
                     .createAsync()
-                    .thenApply(producer -> new PulsarBenchmarkProducer(producer, 0L));
+                    .thenApply(producer -> new PulsarBenchmarkProducer(producer, effectiveOptions));
         } else {
             throw new IllegalArgumentException("producerType " + config.producerType + " is invalid");
         }

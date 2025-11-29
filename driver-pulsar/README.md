@@ -6,8 +6,13 @@ For instructions on running the OpenMessaging benchmarks for Pulsar, see the [of
 
 This fork adds simple support for Pulsar broker-side delayed delivery. To run a delayed-message benchmark:
 
-- Use the delayed driver config, for example: `driver-pulsar/pulsar-delayed-5s.yaml` (all produced messages are delivered 5 seconds later).
-- Or set `producer.messageDelayMs` in any existing Pulsar driver YAML (e.g. `driver-pulsar/pulsar.yaml`) to a value greater than 0.
+- Use one of the delayed driver configs, for example:
+  - `driver-pulsar/pulsar-delayed-1s.yaml` (all produced messages are delivered 1 second later)
+  - `driver-pulsar/pulsar-delayed-5s.yaml` (all produced messages are delivered 5 seconds later)
+  - `driver-pulsar/pulsar-delayed-10s.yaml` (all produced messages are delivered 10 seconds later)
+- Or set `producer.messageDelayMs` in any existing Pulsar driver YAML (e.g. `driver-pulsar/pulsar.yaml`) to a value greater than 0 for a fixed delay.
+- To use a per-message random delay, set `producer.minMessageDelayMs` and `producer.maxMessageDelayMs` (e.g. `minMessageDelayMs: 1000`, `maxMessageDelayMs: 10000` for a random delay between 1s and 10s). When `maxMessageDelayMs > 0`, the driver will ignore `messageDelayMs` and use a random value in `[minMessageDelayMs, maxMessageDelayMs]` for each message.
+- Workload YAMLs can also override these settings per workload by setting `messageDelayMs`, `minMessageDelayMs` and `maxMessageDelayMs`.
 - Then choose a workload YAML (for example `workloads/pulsar-delayed-1-topic-16-partitions-1kb.yaml`) and run the benchmark as usual.
 
 End-to-end latency metrics will include the configured delivery delay.

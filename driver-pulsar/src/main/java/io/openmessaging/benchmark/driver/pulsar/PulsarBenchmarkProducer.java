@@ -15,8 +15,10 @@ package io.openmessaging.benchmark.driver.pulsar;
 
 
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
+import io.openmessaging.benchmark.driver.ProducerOptions;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import org.apache.pulsar.client.api.Producer;
 import org.apache.pulsar.client.api.TypedMessageBuilder;
@@ -24,11 +26,11 @@ import org.apache.pulsar.client.api.TypedMessageBuilder;
 public class PulsarBenchmarkProducer implements BenchmarkProducer {
 
     private final Producer<byte[]> producer;
-    private final long messageDelayMs;
+    private final ProducerOptions options;
 
-    public PulsarBenchmarkProducer(Producer<byte[]> producer, long messageDelayMs) {
+    public PulsarBenchmarkProducer(Producer<byte[]> producer, ProducerOptions options) {
         this.producer = producer;
-        this.messageDelayMs = messageDelayMs;
+        this.options = options;
     }
 
     @Override
@@ -43,10 +45,29 @@ public class PulsarBenchmarkProducer implements BenchmarkProducer {
             msgBuilder.key(key.get());
         }
 
-        if (messageDelayMs > 0) {
-            msgBuilder.deliverAfter(messageDelayMs, TimeUnit.MILLISECONDS);
+        long delayMs = resolveDelayMillis();
+        if (delayMs > 0) {
+            msgBuilder.deliverAfter(delayMs, TimeUnit.MILLISECONDS);
         }
 
         return msgBuilder.sendAsync().thenApply(msgId -> null);
+    }
+
+    private long resolveDelayMillis() {
+        long max = options.maxMessageDelayMs;
+        long min = options.minMessageDelayMs;
+        long fixed = options.messageDelayMs;
+
+        if (max > 0) {
+            long effectiveMin = min > 0 ? min : 1L;
+            if (effectiveMin >= max) {
+                // Degenerate range, fall back to fixed max delay
+                return max;
+            }
+            long bound = max - effectiveMin + 1;
+            return ThreadLocalRandom.current().nextLong(bound) + effectiveMin;
+        }
+
+        return fixed;
     }
 }
