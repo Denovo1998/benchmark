@@ -17,6 +17,7 @@ core/*.json
 **/*.lock.info
 .DS_Store
 .factorypath
+/results/
 
 # IntelliJ artifacts
 .idea/

@@ -248,15 +248,18 @@
                         <exclude>LICENSE</exclude>
                         <exclude>NOTICE</exclude>
                         <exclude>payload/**</exclude>
+                        <exclude>results/**</exclude>
                         <exclude>**/*.pyc</exclude>
                         <exclude>**/.pydevproject</exclude>
                         <exclude>.github/**</exclude>
                     </excludes>
                     <mapping>
                         <benchmark>SCRIPT_STYLE</benchmark>
+                        <benchmark-worker>SCRIPT_STYLE</benchmark-worker>
                         <j2>SCRIPT_STYLE</j2>
                         <conf>SCRIPT_STYLE</conf>
                         <yaml>SCRIPT_STYLE</yaml>
+                        <tpl>SCRIPT_STYLE</tpl>
                         <md>XML_STYLE</md>
                         <lombok.config>SCRIPT_STYLE</lombok.config>
                         <puml>APOSTROPHE_STYLE</puml>
