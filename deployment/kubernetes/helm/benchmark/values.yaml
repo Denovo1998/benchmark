@@ -13,11 +13,9 @@
 #
 
 #
-# How many benchmark-worker pods to run.
-# Notes:
-# - 8 is a common default for generating higher load in a multi-node cluster.
-# - On a single physical node, set this to 1 (or a small number) to fit CPU/memory.
-numWorkers: 0
+# The Nereus v0.1.0 campaign uses exactly two workers on the apps node:
+# one producer worker and one consumer worker. Keep this fixed across A-E.
+numWorkers: 2
 image: openmessaging/openmessaging-benchmark:pulsar
 # Optional immutable OCI target digest. When set, Pods use image@digest rather
 # than the mutable tag above.
@@ -55,7 +53,9 @@ results:
 #driverCpuRequest: 1000m
 #driverCpuLimit: 1000m
 
-workersMemoryRequest: 4Gi
-workersMemoryLimit: 4Gi
+# benchmark-worker defaults to a 4 GiB Java heap. Reserve another 2 GiB for
+# direct buffers, metaspace, thread stacks, and other native allocations.
+workersMemoryRequest: 6Gi
+workersMemoryLimit: 6Gi
 workersCpuRequest: 2000m
 workersCpuLimit: 2000m

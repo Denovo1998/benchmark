@@ -1171,12 +1171,13 @@ immutable OMB image。被测 Pulsar release 和数据必须每 run 重建。
 当前 Chart 默认：
 
 ```yaml
-numWorkers: 0
+numWorkers: 2
 image: openmessaging/openmessaging-benchmark:pulsar
 imagePullPolicy: IfNotPresent
 ```
 
-这是可变 tag，不能用于正式 campaign。实现完成并 commit 后构建：
+worker 数量已经固定为 2，但默认镜像仍是可变 tag，不能用于正式 campaign。
+实现完成并 commit 后构建：
 
 ```text
 nereus-benchmark/openmessaging-benchmark:
@@ -1200,7 +1201,7 @@ OMB driver/worker 的节点；Chart 正式 values 使用 `imagePullPolicy: Never
 正式 values 至少覆盖：
 
 ```yaml
-numWorkers: 4
+numWorkers: 2
 image: nereus-benchmark/openmessaging-benchmark:pulsar-b<OMB_SHORT_SHA>-amd64
 imagePullPolicy: Never
 ```
@@ -1239,15 +1240,30 @@ workers:
   resources:
     requests:
       cpu: "2"
-      memory: 4Gi
+      memory: 6Gi
     limits:
       cpu: "2"
-      memory: 4Gi
+      memory: 6Gi
 ```
 
-正式分布式模式至少需要 2 个 worker；建议从 4 个 worker 开始，使 OMB 当前逻辑
-分成 2 个 producer worker 和 2 个 consumer worker。最终 worker 数只能在 S1/C1
-预检确认客户端不是瓶颈后冻结，A–E 之间不得改变。
+正式分布式模式固定使用 2 个 worker，OMB 将其分成 1 个 producer worker 和
+1 个 consumer worker。每个 worker 的 JVM 默认使用 4 GiB heap，因此 Pod
+固定预留 6 GiB，为 direct buffer、metaspace、线程栈和其他 native allocation
+保留 2 GiB。S1/C1 预检必须确认这两个 worker 不是客户端瓶颈；如果无法满足，
+应增加独立负载节点并开始新的 campaign，不能在当前 A–E campaign 中途改变
+worker 数量或资源。
+
+apps 节点使用 Intel 混合 P-Core/E-Core 时，不能假设某个固定逻辑 CPU 编号范围
+就是 P-Core。部署前先根据 `lscpu -e=CPU,CORE,SOCKET,ONLINE,MAXMHZ` 和
+thread sibling 映射确认 P/E CPU 集合。推荐在 kubelet 启用 `static` CPU Manager
+和 `full-pcpus-only`，并把所有 E-Core 逻辑 CPU 写入
+`reservedSystemCPUs`。SeaweedFS 和 OMB worker 都必须保持整数 CPU 且
+requests 等于 limits；这样它们从剩余的 P-Core 集合获得独占的完整物理核。
+当前 campaign 将 SeaweedFS request 和 limit 固定为 `cpu: "4"`，在当前
+2-thread P-Core 上代表两个完整 P-Core；两个 OMB worker 各使用
+`cpu: "2"`，分别获得一个完整 P-Core。每次部署后必须从
+`/var/lib/kubelet/cpu_manager_state` 和容器的 `Cpus_allowed_list` 收集实际
+CPUSet 证据。
 
 若 apps 节点 CPU、NIC 或磁盘因 SeaweedFS 与 OMB 共存达到瓶颈，应把 OMB 移到
 独立外部负载机；不能只为 D/E 临时增加 worker 或 CPU。
