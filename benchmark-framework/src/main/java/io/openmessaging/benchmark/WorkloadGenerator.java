@@ -16,21 +16,30 @@ package io.openmessaging.benchmark;
 import static java.util.concurrent.TimeUnit.MINUTES;
 
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
+import io.openmessaging.benchmark.driver.RunConfiguration;
 import io.openmessaging.benchmark.utils.PaddingDecimalFormat;
-import io.openmessaging.benchmark.utils.RandomGenerator;
+import io.openmessaging.benchmark.utils.SeedDerivation;
 import io.openmessaging.benchmark.utils.Timer;
 import io.openmessaging.benchmark.utils.payload.FilePayloadReader;
+import io.openmessaging.benchmark.utils.payload.PayloadPoolFactory;
 import io.openmessaging.benchmark.utils.payload.PayloadReader;
 import io.openmessaging.benchmark.worker.Worker;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
+import io.openmessaging.benchmark.worker.commands.PayloadSpec;
+import io.openmessaging.benchmark.worker.commands.PayloadSpec.PayloadMode;
 import io.openmessaging.benchmark.worker.commands.PeriodStats;
 import io.openmessaging.benchmark.worker.commands.ProducerWorkAssignment;
 import io.openmessaging.benchmark.worker.commands.TopicSubscription;
 import io.openmessaging.benchmark.worker.commands.TopicsInfo;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.DecimalFormat;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -38,28 +47,50 @@ import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import org.apache.commons.lang.ArrayUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class WorkloadGenerator implements AutoCloseable {
 
     private final String driverName;
+    private final RunConfiguration run;
     private final Workload workload;
     private final Worker worker;
+    private DriverRuntimeInfo runtimeInfo;
+    private final List<TopicSubscription> backlogTargets = new ArrayList<>();
+    private final List<String> assignmentFingerprint = new ArrayList<>();
 
     private final ExecutorService executor =
             Executors.newCachedThreadPool(new DefaultThreadFactory("messaging-benchmark"));
 
     private volatile boolean runCompleted = false;
     private volatile boolean needToWaitForBacklogDraining = false;
+    private volatile Throwable runFailure;
+    private volatile long requestedBacklogBytes;
+    private volatile long backlogAtDrainStartMessages;
+    private volatile double backlogBuildDurationSeconds;
+    private volatile double backlogDrainDurationSeconds;
+    private volatile double averageDrainRateMessagesPerSecond;
+    private volatile double peakDrainRateMessagesPerSecond;
+    private volatile long postDrainBacklogMessages;
+    private volatile Long brokerBacklogAtDrainStartMessages;
+    private volatile Long brokerBacklogAfterDrainMessages;
+    private volatile String backlogPhase = "NOT_APPLICABLE";
 
     private volatile double targetPublishRate;
 
     public WorkloadGenerator(String driverName, Workload workload, Worker worker) {
+        this(driverName, null, workload, worker);
+    }
+
+    public WorkloadGenerator(
+            String driverName, RunConfiguration run, Workload workload, Worker worker) {
         this.driverName = driverName;
+        this.run = run;
         this.workload = workload;
         this.worker = worker;
+        workload.validate();
+        validateRunConfiguration(run, workload);
 
         if (workload.consumerBacklogSizeGB > 0 && workload.producerRate == 0) {
             throw new IllegalArgumentException(
@@ -68,9 +99,13 @@ public class WorkloadGenerator implements AutoCloseable {
     }
 
     public TestResult run() throws Exception {
+        runtimeInfo = worker.getDriverRuntimeInfo();
+        validateRuntimeInfo(runtimeInfo);
         Timer timer = new Timer();
         List<String> topics =
-                worker.createTopics(new TopicsInfo(workload.topics, workload.partitionsPerTopic));
+                worker.createTopics(
+                        new TopicsInfo(
+                                workload.topics, workload.partitionsPerTopic, run == null ? null : run.seed));
         log.info("Created {} topics in {} ms", topics.size(), timer.elapsedMillis());
 
         createConsumers(topics);
@@ -89,34 +124,37 @@ public class WorkloadGenerator implements AutoCloseable {
                         // Run background controller to adjust rate
                         try {
                             findMaximumSustainableRate(targetPublishRate);
-                        } catch (IOException e) {
+                        } catch (Throwable e) {
+                            runFailure = e;
                             log.warn("Failure in finding max sustainable rate", e);
                         }
                     });
         }
 
-        final PayloadReader payloadReader = new FilePayloadReader(workload.messageSize);
-
         ProducerWorkAssignment producerWorkAssignment = new ProducerWorkAssignment();
         producerWorkAssignment.keyDistributorType = workload.keyDistributor;
         producerWorkAssignment.publishRate = targetPublishRate;
-        producerWorkAssignment.payloadData = new ArrayList<>();
+        producerWorkAssignment.payloadSelectionSeed = deriveSeed("worker-payload-selection", 0);
 
         if (workload.useRandomizedPayloads) {
-            // create messages that are part random and part zeros
-            // better for testing effects of compression
-            Random r = new Random();
-            int randomBytes = (int) (workload.messageSize * workload.randomBytesRatio);
-            int zerodBytes = workload.messageSize - randomBytes;
-            for (int i = 0; i < workload.randomizedPayloadPoolSize; i++) {
-                byte[] randArray = new byte[randomBytes];
-                r.nextBytes(randArray);
-                byte[] zerodArray = new byte[zerodBytes];
-                byte[] combined = ArrayUtils.addAll(randArray, zerodArray);
-                producerWorkAssignment.payloadData.add(combined);
-            }
+            PayloadSpec spec = new PayloadSpec();
+            spec.mode = PayloadMode.RANDOMIZED;
+            spec.messageSize = workload.messageSize;
+            spec.randomBytesRatio = workload.randomBytesRatio;
+            spec.poolSize = workload.randomizedPayloadPoolSize;
+            spec.seed = deriveSeed("payload-pool", 0);
+            List<byte[]> payloadPool = PayloadPoolFactory.create(spec);
+            spec.expectedSha256 = PayloadPoolFactory.checksum(payloadPool);
+            producerWorkAssignment.payloadSpec = spec;
         } else {
-            producerWorkAssignment.payloadData.add(payloadReader.load(workload.payloadFile));
+            PayloadReader payloadReader = new FilePayloadReader(workload.messageSize);
+            PayloadSpec spec = new PayloadSpec();
+            spec.mode = PayloadMode.INLINE;
+            spec.messageSize = workload.messageSize;
+            spec.inlinePayload = payloadReader.load(workload.payloadFile);
+            spec.expectedSha256 =
+                    PayloadPoolFactory.checksum(java.util.Collections.singletonList(spec.inlinePayload));
+            producerWorkAssignment.payloadSpec = spec;
         }
 
         worker.startLoad(producerWorkAssignment);
@@ -131,8 +169,9 @@ public class WorkloadGenerator implements AutoCloseable {
                     () -> {
                         try {
                             buildAndDrainBacklog(workload.testDurationMinutes);
-                        } catch (IOException e) {
-                            e.printStackTrace();
+                        } catch (Throwable e) {
+                            runFailure = e;
+                            log.error("Failure in backlog phase", e);
                         }
                     });
         }
@@ -141,6 +180,27 @@ public class WorkloadGenerator implements AutoCloseable {
         log.info("----- Starting benchmark traffic ({}m)------", workload.testDurationMinutes);
 
         TestResult result = printAndCollectStats(workload.testDurationMinutes, TimeUnit.MINUTES);
+        if (workload.consumerBacklogSizeGB > 0) {
+            backlogPhase = "COMPLETE";
+        }
+        PayloadSpec effectivePayload = producerWorkAssignment.payloadSpec;
+        result.payloadMode = effectivePayload.mode.name();
+        result.payloadMessageSize = effectivePayload.messageSize;
+        result.payloadRandomBytesRatio = effectivePayload.randomBytesRatio;
+        result.payloadPoolSize = effectivePayload.poolSize;
+        result.payloadSeed = effectivePayload.seed;
+        result.payloadSha256 = effectivePayload.expectedSha256;
+        result.assignmentSha256 = assignmentSha256();
+        result.requestedBacklogBytes = requestedBacklogBytes;
+        result.backlogAtDrainStartMessages = backlogAtDrainStartMessages;
+        result.backlogBuildDurationSeconds = backlogBuildDurationSeconds;
+        result.backlogDrainDurationSeconds = backlogDrainDurationSeconds;
+        result.averageDrainRateMessagesPerSecond = averageDrainRateMessagesPerSecond;
+        result.peakDrainRateMessagesPerSecond = peakDrainRateMessagesPerSecond;
+        result.postDrainBacklogMessages = postDrainBacklogMessages;
+        result.brokerBacklogAtDrainStartMessages = brokerBacklogAtDrainStartMessages;
+        result.brokerBacklogAfterDrainMessages = brokerBacklogAfterDrainMessages;
+        result.backlogPhase = backlogPhase;
         runCompleted = true;
 
         worker.stopAll();
@@ -229,11 +289,14 @@ public class WorkloadGenerator implements AutoCloseable {
 
     private void createConsumers(List<String> topics) throws IOException {
         ConsumerAssignment consumerAssignment = new ConsumerAssignment();
+        backlogTargets.clear();
+        assignmentFingerprint.clear();
 
         for (String topic : topics) {
             for (int i = 0; i < workload.subscriptionsPerTopic; i++) {
                 String subscriptionName =
-                        String.format("sub-%03d-%s", i, RandomGenerator.getRandomString());
+                        String.format("sub-%03d-%016x", i, deriveSeed("subscription-name", i));
+                backlogTargets.add(new TopicSubscription(topic, subscriptionName));
                 for (int j = 0; j < workload.consumerPerSubscription; j++) {
                     consumerAssignment.topicsSubscriptions.add(
                             new TopicSubscription(topic, subscriptionName));
@@ -241,7 +304,11 @@ public class WorkloadGenerator implements AutoCloseable {
             }
         }
 
-        Collections.shuffle(consumerAssignment.topicsSubscriptions);
+        Collections.shuffle(
+                consumerAssignment.topicsSubscriptions, new Random(deriveSeed("consumer-assignment", 0)));
+        for (TopicSubscription assignment : consumerAssignment.topicsSubscriptions) {
+            assignmentFingerprint.add("consumer\0" + assignment.topic + "\0" + assignment.subscription);
+        }
 
         Timer timer = new Timer();
 
@@ -260,7 +327,10 @@ public class WorkloadGenerator implements AutoCloseable {
             fullListOfTopics.addAll(topics);
         }
 
-        Collections.shuffle(fullListOfTopics);
+        Collections.shuffle(fullListOfTopics, new Random(deriveSeed("producer-assignment", 0)));
+        for (String topic : fullListOfTopics) {
+            assignmentFingerprint.add("producer\0" + topic);
+        }
 
         Timer timer = new Timer();
 
@@ -270,12 +340,16 @@ public class WorkloadGenerator implements AutoCloseable {
 
     private void buildAndDrainBacklog(int testDurationMinutes) throws IOException {
         Timer timer = new Timer();
+        backlogPhase = "PREPARE_SUBSCRIPTION";
         log.info("Stopping all consumers to build backlog");
         worker.pauseConsumers();
 
         this.needToWaitForBacklogDraining = true;
+        backlogPhase = "BUILD_BACKLOG";
 
-        long requestedBacklogSize = workload.consumerBacklogSizeGB * 1024 * 1024 * 1024;
+        long requestedBacklogSize = workload.consumerBacklogSizeGB * 1024L * 1024L * 1024L;
+        requestedBacklogBytes = requestedBacklogSize;
+        long buildStartNanos = System.nanoTime();
 
         while (true) {
             CountersStats stats = worker.getCountersStats();
@@ -284,6 +358,9 @@ public class WorkloadGenerator implements AutoCloseable {
                             * workload.messageSize;
 
             if (currentBacklogSize >= requestedBacklogSize) {
+                backlogAtDrainStartMessages =
+                        workload.subscriptionsPerTopic * stats.messagesSent - stats.messagesReceived;
+                brokerBacklogAtDrainStartMessages = readBrokerBacklog();
                 break;
             }
 
@@ -294,11 +371,17 @@ public class WorkloadGenerator implements AutoCloseable {
             }
         }
 
+        backlogBuildDurationSeconds = (System.nanoTime() - buildStartNanos) / 1_000_000_000.0;
         log.info("--- Completed backlog build in {} s ---", timer.elapsedSeconds());
         timer = new Timer();
         log.info("--- Start draining backlog ---");
 
+        backlogPhase = "DRAIN_BACKLOG";
         worker.resumeConsumers();
+        long drainStartNanos = System.nanoTime();
+        long previousBacklog = backlogAtDrainStartMessages;
+        long previousNanos = drainStartNanos;
+        long drainedMessages = 0;
 
         long backlogMessageCapacity = requestedBacklogSize / workload.messageSize;
         long backlogEmptyLevel = (long) ((1.0 - workload.backlogDrainRatio) * backlogMessageCapacity);
@@ -308,7 +391,21 @@ public class WorkloadGenerator implements AutoCloseable {
             CountersStats stats = worker.getCountersStats();
             long currentBacklog =
                     workload.subscriptionsPerTopic * stats.messagesSent - stats.messagesReceived;
+            long nowNanos = System.nanoTime();
+            long elapsedNanos = nowNanos - previousNanos;
+            if (elapsedNanos > 0 && currentBacklog < previousBacklog) {
+                double rate = (previousBacklog - currentBacklog) / (elapsedNanos / 1_000_000_000.0);
+                peakDrainRateMessagesPerSecond = Math.max(peakDrainRateMessagesPerSecond, rate);
+                drainedMessages += previousBacklog - currentBacklog;
+            }
+            previousBacklog = currentBacklog;
+            previousNanos = nowNanos;
             if (currentBacklog <= minBacklog) {
+                postDrainBacklogMessages = currentBacklog;
+                brokerBacklogAfterDrainMessages = readBrokerBacklog();
+                backlogDrainDurationSeconds = (nowNanos - drainStartNanos) / 1_000_000_000.0;
+                averageDrainRateMessagesPerSecond =
+                        backlogDrainDurationSeconds > 0 ? drainedMessages / backlogDrainDurationSeconds : 0.0;
                 log.info("--- Completed backlog draining in {} s ---", timer.elapsedSeconds());
 
                 try {
@@ -318,6 +415,7 @@ public class WorkloadGenerator implements AutoCloseable {
                 }
 
                 needToWaitForBacklogDraining = false;
+                backlogPhase = "POST_DRAIN_STEADY";
                 return;
             }
 
@@ -326,6 +424,42 @@ public class WorkloadGenerator implements AutoCloseable {
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    private Long readBrokerBacklog() throws IOException {
+        long total = 0;
+        for (TopicSubscription target : backlogTargets) {
+            long backlog = worker.getSubscriptionBacklog(target.topic, target.subscription);
+            if (backlog < 0) {
+                if (run != null) {
+                    throw new IOException(
+                            "driver does not expose broker backlog for formal B1 run: "
+                                    + target.topic
+                                    + "/"
+                                    + target.subscription);
+                }
+                return null;
+            }
+            total += backlog;
+        }
+        return total;
+    }
+
+    private String assignmentSha256() {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (String assignment : assignmentFingerprint) {
+                digest.update(assignment.getBytes(StandardCharsets.UTF_8));
+                digest.update((byte) '\n');
+            }
+            StringBuilder result = new StringBuilder(64);
+            for (byte value : digest.digest()) {
+                result.append(String.format("%02x", value & 0xff));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("JVM does not provide SHA-256", e);
         }
     }
 
@@ -339,6 +473,8 @@ public class WorkloadGenerator implements AutoCloseable {
         long testEndTime = testDurations > 0 ? startTime + unit.toNanos(testDurations) : Long.MAX_VALUE;
 
         TestResult result = new TestResult();
+        result.run = run;
+        result.runtimeInfo = runtimeInfo;
         result.workload = workload.name;
         result.driver = driverName;
         result.topics = workload.topics;
@@ -349,9 +485,13 @@ public class WorkloadGenerator implements AutoCloseable {
 
         while (true) {
             try {
-                Thread.sleep(10000);
+                Thread.sleep(TimeUnit.SECONDS.toMillis(workload.statsIntervalSeconds));
             } catch (InterruptedException e) {
                 break;
+            }
+
+            if (runFailure != null) {
+                throw new IOException("benchmark background phase failed", runFailure);
             }
 
             PeriodStats stats = worker.getPeriodStats();
@@ -429,6 +569,25 @@ public class WorkloadGenerator implements AutoCloseable {
             result.endToEndLatency9999pct.add(
                     microsToMillis(stats.endToEndLatency.getValueAtPercentile(99.99)));
             result.endToEndLatencyMax.add(microsToMillis(stats.endToEndLatency.getMaxValue()));
+
+            PeriodSample sample = new PeriodSample();
+            sample.timestamp = Instant.now().toString();
+            sample.elapsedSeconds = (now - startTime) / 1_000_000_000L;
+            sample.messagesSent = stats.messagesSent;
+            sample.messagesReceived = stats.messagesReceived;
+            sample.messageSendErrors = stats.messageSendErrors;
+            sample.bytesSent = stats.bytesSent;
+            sample.bytesReceived = stats.bytesReceived;
+            sample.inFlightSends = stats.inFlightSends;
+            sample.backlog = currentBacklog;
+            sample.publishRate = publishRate;
+            sample.publishThroughputMiB = publishThroughput;
+            sample.consumeRate = consumeRate;
+            sample.consumeThroughputMiB = consumeThroughput;
+            sample.publishErrorRate = errorRate;
+            sample.publishLatencyP99Ms = microsToMillis(stats.publishLatency.getValueAtPercentile(99));
+            sample.endToEndLatencyP99Ms = microsToMillis(stats.endToEndLatency.getValueAtPercentile(99));
+            result.samples.add(sample);
 
             if (now >= testEndTime && !needToWaitForBacklogDraining) {
                 CumulativeLatencies agg = worker.getCumulativeLatencies();
@@ -536,4 +695,39 @@ public class WorkloadGenerator implements AutoCloseable {
     }
 
     private static final Logger log = LoggerFactory.getLogger(WorkloadGenerator.class);
+
+    private long deriveSeed(String domain, long ordinal) {
+        return run == null ? new Random().nextLong() : SeedDerivation.derive(run.seed, domain, ordinal);
+    }
+
+    private static void validateRunConfiguration(RunConfiguration run, Workload workload) {
+        if (run == null) {
+            return;
+        }
+        if (!run.isConfigured()) {
+            throw new IllegalArgumentException(
+                    "formal run requires campaignId, blockId, runId, stage, repetition and seed");
+        }
+        if (!run.stage.matches("[ABCDE]") || run.runId.matches(".*[^A-Za-z0-9._-].*")) {
+            throw new IllegalArgumentException("invalid formal run stage or runId");
+        }
+    }
+
+    private void validateRuntimeInfo(DriverRuntimeInfo actual) {
+        if (run == null) {
+            return;
+        }
+        if (actual == null || actual.namespace == null || actual.namespace.isEmpty()) {
+            throw new IllegalStateException("driver did not return runtime namespace evidence");
+        }
+        if (actual.run == null
+                || !run.runId.equals(actual.run.runId)
+                || !run.campaignId.equals(actual.run.campaignId)
+                || !run.blockId.equals(actual.run.blockId)
+                || !run.stage.equals(actual.run.stage)
+                || run.repetition != actual.run.repetition
+                || !run.seed.equals(actual.run.seed)) {
+            throw new IllegalStateException("driver runtime run identity does not match driver YAML");
+        }
+    }
 }

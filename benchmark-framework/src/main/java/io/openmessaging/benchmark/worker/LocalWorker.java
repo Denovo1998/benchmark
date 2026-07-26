@@ -30,11 +30,14 @@ import io.openmessaging.benchmark.driver.BenchmarkDriver.ProducerInfo;
 import io.openmessaging.benchmark.driver.BenchmarkDriver.TopicInfo;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
 import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.utils.RandomGenerator;
+import io.openmessaging.benchmark.utils.SeedDerivation;
 import io.openmessaging.benchmark.utils.Timer;
 import io.openmessaging.benchmark.utils.UniformRateLimiter;
 import io.openmessaging.benchmark.utils.distributor.KeyDistributor;
+import io.openmessaging.benchmark.utils.payload.PayloadPoolFactory;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
@@ -51,7 +54,6 @@ import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
@@ -70,7 +72,7 @@ public class LocalWorker implements Worker, ConsumerCallback {
             Executors.newCachedThreadPool(new DefaultThreadFactory("local-worker"));
     private final WorkerStats stats;
     private boolean testCompleted = false;
-    private boolean consumersArePaused = false;
+    private Long topicNameSeed;
 
     public LocalWorker() {
         this(NullStatsLogger.INSTANCE);
@@ -106,6 +108,7 @@ public class LocalWorker implements Worker, ConsumerCallback {
     @Override
     public List<String> createTopics(TopicsInfo topicsInfo) {
         Timer timer = new Timer();
+        topicNameSeed = topicsInfo.topicNameSeed;
 
         List<TopicInfo> topicInfos =
                 IntStream.range(0, topicsInfo.numberOfTopics)
@@ -121,9 +124,35 @@ public class LocalWorker implements Worker, ConsumerCallback {
         return topics;
     }
 
+    @Override
+    public DriverRuntimeInfo getDriverRuntimeInfo() throws IOException {
+        if (benchmarkDriver == null) {
+            throw new IOException("driver is not initialized");
+        }
+        return benchmarkDriver.getRuntimeInfo();
+    }
+
+    @Override
+    public long getSubscriptionBacklog(String topic, String subscriptionName) throws IOException {
+        if (benchmarkDriver == null) {
+            throw new IOException("driver is not initialized");
+        }
+        try {
+            return benchmarkDriver
+                    .getSubscriptionBacklog(topic, subscriptionName)
+                    .toCompletableFuture()
+                    .join();
+        } catch (RuntimeException e) {
+            throw new IOException("failed to read broker subscription backlog", e);
+        }
+    }
+
     private String generateTopicName(int i) {
-        return String.format(
-                "%s-%07d-%s", benchmarkDriver.getTopicNamePrefix(), i, RandomGenerator.getRandomString());
+        String suffix =
+                topicNameSeed == null
+                        ? RandomGenerator.getRandomString()
+                        : String.format("%016x", SeedDerivation.derive(topicNameSeed, "topic-name", i));
+        return String.format("%s-%07d-%s", benchmarkDriver.getTopicNamePrefix(), i, suffix);
     }
 
     @Override
@@ -171,6 +200,7 @@ public class LocalWorker implements Worker, ConsumerCallback {
     @Override
     public void startLoad(ProducerWorkAssignment producerWorkAssignment) {
         int processors = Runtime.getRuntime().availableProcessors();
+        List<byte[]> payloads = resolvePayloads(producerWorkAssignment);
 
         updateMessageProducer(producerWorkAssignment.publishRate);
 
@@ -185,14 +215,28 @@ public class LocalWorker implements Worker, ConsumerCallback {
             processorIdx = (processorIdx + 1) % processors;
         }
 
-        processorAssignment
-                .values()
-                .forEach(
-                        producers ->
-                                submitProducersToExecutor(
-                                        producers,
-                                        KeyDistributor.build(producerWorkAssignment.keyDistributorType),
-                                        producerWorkAssignment.payloadData));
+        int executorOrdinal = 0;
+        for (List<BenchmarkProducer> assignedProducers : processorAssignment.values()) {
+            submitProducersToExecutor(
+                    assignedProducers,
+                    producerWorkAssignment.keyDistributorType,
+                    payloads,
+                    producerWorkAssignment.payloadSelectionSeed,
+                    executorOrdinal++);
+        }
+    }
+
+    private List<byte[]> resolvePayloads(ProducerWorkAssignment assignment) {
+        if (assignment.payloadSpec != null && assignment.payloadData != null) {
+            throw new IllegalArgumentException("payloadSpec and legacy payloadData cannot both be set");
+        }
+        if (assignment.payloadSpec != null) {
+            return PayloadPoolFactory.create(assignment.payloadSpec);
+        }
+        if (assignment.payloadData == null || assignment.payloadData.isEmpty()) {
+            throw new IllegalArgumentException("producer payload assignment is empty");
+        }
+        return assignment.payloadData;
     }
 
     @Override
@@ -203,8 +247,19 @@ public class LocalWorker implements Worker, ConsumerCallback {
     }
 
     private void submitProducersToExecutor(
-            List<BenchmarkProducer> producers, KeyDistributor keyDistributor, List<byte[]> payloads) {
-        ThreadLocalRandom r = ThreadLocalRandom.current();
+            List<BenchmarkProducer> producers,
+            io.openmessaging.benchmark.utils.distributor.KeyDistributorType keyDistributorType,
+            List<byte[]> payloads,
+            long payloadSelectionSeed,
+            int executorOrdinal) {
+        java.util.Random r =
+                new java.util.Random(
+                        SeedDerivation.derive(
+                                payloadSelectionSeed, "executor-payload-selection", executorOrdinal));
+        KeyDistributor keyDistributor =
+                KeyDistributor.build(
+                        keyDistributorType,
+                        SeedDerivation.derive(payloadSelectionSeed, "key-selection", executorOrdinal));
         int payloadCount = payloads.size();
         executor.submit(
                 () -> {
@@ -265,25 +320,21 @@ public class LocalWorker implements Worker, ConsumerCallback {
         long now = System.currentTimeMillis();
         long endToEndLatencyMicros = TimeUnit.MILLISECONDS.toMicros(now - publishTimestamp);
         stats.recordMessageReceived(size, endToEndLatencyMicros);
-
-        while (consumersArePaused) {
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     @Override
     public void pauseConsumers() throws IOException {
-        consumersArePaused = true;
+        for (BenchmarkConsumer consumer : consumers) {
+            consumer.pause();
+        }
         log.info("Pausing consumers");
     }
 
     @Override
     public void resumeConsumers() throws IOException {
-        consumersArePaused = false;
+        for (BenchmarkConsumer consumer : consumers) {
+            consumer.resume();
+        }
         log.info("Resuming consumers");
     }
 
@@ -295,7 +346,6 @@ public class LocalWorker implements Worker, ConsumerCallback {
     @Override
     public void stopAll() {
         testCompleted = true;
-        consumersArePaused = false;
         stats.reset();
 
         try {

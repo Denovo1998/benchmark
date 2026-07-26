@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.worker;
 
-
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
 import io.openmessaging.benchmark.worker.commands.PeriodStats;
@@ -51,6 +50,7 @@ public class WorkerStats {
     private final LongAdder totalMessagesSent = new LongAdder();
     private final LongAdder totalMessageSendErrors = new LongAdder();
     private final LongAdder totalMessagesReceived = new LongAdder();
+    private final LongAdder inFlightSends = new LongAdder();
 
     private static final long highestTrackableValue = TimeUnit.SECONDS.toMicros(60);
     private final Recorder publishLatencyRecorder = new Recorder(highestTrackableValue, 5);
@@ -112,6 +112,7 @@ public class WorkerStats {
         stats.totalMessagesSent = totalMessagesSent.sum();
         stats.totalMessageSendErrors = totalMessageSendErrors.sum();
         stats.totalMessagesReceived = totalMessagesReceived.sum();
+        stats.inFlightSends = inFlightSends.sum();
 
         stats.publishLatency = publishLatencyRecorder.getIntervalHistogram();
         stats.publishDelayLatency = publishDelayLatencyRecorder.getIntervalHistogram();
@@ -132,6 +133,7 @@ public class WorkerStats {
         stats.messagesSent = totalMessagesSent.sum();
         stats.messageSendErrors = totalMessageSendErrors.sum();
         stats.messagesReceived = totalMessagesReceived.sum();
+        stats.inFlightSends = inFlightSends.sum();
         return stats;
     }
 
@@ -157,6 +159,7 @@ public class WorkerStats {
     }
 
     public void recordProducerFailure() {
+        inFlightSends.decrement();
         messageSendErrors.increment();
         messageSendErrorCounter.inc();
         totalMessageSendErrors.increment();
@@ -164,6 +167,7 @@ public class WorkerStats {
 
     public void recordProducerSuccess(
             long payloadLength, long intendedSendTimeNs, long sendTimeNs, long nowNs) {
+        inFlightSends.decrement();
         messagesSent.increment();
         totalMessagesSent.increment();
         messagesSentCounter.inc();
@@ -182,5 +186,9 @@ public class WorkerStats {
         publishDelayLatencyRecorder.recordValue(sendDelayMicros);
         cumulativePublishDelayLatencyRecorder.recordValue(sendDelayMicros);
         publishDelayLatencyStats.registerSuccessfulEvent(sendDelayMicros, TimeUnit.MICROSECONDS);
+    }
+
+    public void recordProducerStarted() {
+        inFlightSends.increment();
     }
 }

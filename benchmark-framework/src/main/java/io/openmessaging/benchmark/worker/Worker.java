@@ -13,8 +13,8 @@
  */
 package io.openmessaging.benchmark.worker;
 
-
 import io.openmessaging.benchmark.Workload;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
@@ -28,6 +28,18 @@ import java.util.List;
 public interface Worker extends AutoCloseable {
 
     void initializeDriver(File configurationFile) throws IOException;
+
+    DriverRuntimeInfo getDriverRuntimeInfo() throws IOException;
+
+    /**
+     * Return broker-reported backlog for one topic/subscription, or {@code -1} if unsupported.
+     *
+     * @param topic topic whose subscription should be inspected
+     * @param subscriptionName subscription name
+     * @return message backlog, or {@code -1} when unsupported
+     * @throws IOException when the worker cannot read the broker state
+     */
+    long getSubscriptionBacklog(String topic, String subscriptionName) throws IOException;
 
     List<String> createTopics(TopicsInfo topicsInfo) throws IOException;
 

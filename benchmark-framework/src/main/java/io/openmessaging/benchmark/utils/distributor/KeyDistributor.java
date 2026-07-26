@@ -26,7 +26,6 @@
  */
 package io.openmessaging.benchmark.utils.distributor;
 
-
 import com.google.common.io.BaseEncoding;
 import java.util.Random;
 
@@ -35,12 +34,16 @@ public abstract class KeyDistributor {
     private static final int UNIQUE_COUNT = 10_000;
     private static final int KEY_BYTE_SIZE = 7;
 
-    private static final String[] randomKeys = new String[UNIQUE_COUNT];
+    private final String[] randomKeys = new String[UNIQUE_COUNT];
+    protected final Random random;
 
-    static {
-        // Generate a number of random keys to be used when publishing
+    protected KeyDistributor() {
+        this(new Random().nextLong());
+    }
+
+    protected KeyDistributor(long seed) {
+        this.random = new Random(seed);
         byte[] buffer = new byte[KEY_BYTE_SIZE];
-        Random random = new Random();
         for (int i = 0; i < randomKeys.length; i++) {
             random.nextBytes(buffer);
             randomKeys[i] = BaseEncoding.base64Url().omitPadding().encode(buffer);
@@ -58,16 +61,20 @@ public abstract class KeyDistributor {
     public abstract String next();
 
     public static KeyDistributor build(KeyDistributorType keyType) {
+        return build(keyType, new Random().nextLong());
+    }
+
+    public static KeyDistributor build(KeyDistributorType keyType, long seed) {
         KeyDistributor keyDistributor = null;
         switch (keyType) {
             case NO_KEY:
-                keyDistributor = new NoKeyDistributor();
+                keyDistributor = new NoKeyDistributor(seed);
                 break;
             case KEY_ROUND_ROBIN:
-                keyDistributor = new KeyRoundRobin();
+                keyDistributor = new KeyRoundRobin(seed);
                 break;
             case RANDOM_NANO:
-                keyDistributor = new RandomNano();
+                keyDistributor = new RandomNano(seed);
                 break;
             default:
                 throw new IllegalStateException("Unexpected KeyDistributorType: " + keyType);

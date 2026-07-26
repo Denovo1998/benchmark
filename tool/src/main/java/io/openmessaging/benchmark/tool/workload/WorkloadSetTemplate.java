@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.tool.workload;
 
-
 import io.openmessaging.benchmark.utils.distributor.KeyDistributorType;
 import java.util.Collections;
 import java.util.List;
@@ -35,6 +34,7 @@ public class WorkloadSetTemplate {
 
     /** Number of topics to create in the test. */
     public List<Integer> topics = Collections.emptyList();
+
     /** Number of partitions each topic will contain. */
     public List<Integer> partitionsPerTopic = Collections.emptyList();
 

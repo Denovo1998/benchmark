@@ -15,6 +15,12 @@ package io.openmessaging.benchmark.utils.distributor;
 
 public class NoKeyDistributor extends KeyDistributor {
 
+    public NoKeyDistributor() {}
+
+    public NoKeyDistributor(long seed) {
+        super(seed);
+    }
+
     @Override
     public String next() {
         return null;

@@ -13,11 +13,16 @@
  */
 package io.openmessaging.benchmark.utils.distributor;
 
-
 import javax.annotation.concurrent.NotThreadSafe;
 
 @NotThreadSafe
 public class KeyRoundRobin extends KeyDistributor {
+
+    public KeyRoundRobin() {}
+
+    public KeyRoundRobin(long seed) {
+        super(seed);
+    }
 
     private int currentIndex = 0;
 

@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.driver.pulsar;
 
-
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
@@ -24,7 +23,9 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
 import io.openmessaging.benchmark.driver.ProducerOptions;
+import io.openmessaging.benchmark.driver.RunConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarClientConfig.PersistenceConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarProducerConfig;
@@ -34,7 +35,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Random;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -50,10 +54,14 @@ import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SizeUnit;
 import org.apache.pulsar.client.api.SubscriptionType;
+import org.apache.pulsar.common.partition.PartitionedTopicMetadata;
 import org.apache.pulsar.common.policies.data.BacklogQuota;
 import org.apache.pulsar.common.policies.data.BacklogQuota.RetentionPolicy;
+import org.apache.pulsar.common.policies.data.PartitionedTopicStats;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
+import org.apache.pulsar.common.policies.data.SubscriptionStats;
 import org.apache.pulsar.common.policies.data.TenantInfo;
+import org.apache.pulsar.common.policies.data.TopicStats;
 import org.apache.pulsar.common.util.FutureUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,11 +75,13 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
 
     private String namespace;
     private ProducerBuilder<byte[]> producerBuilder;
+    private DriverRuntimeInfo runtimeInfo = new DriverRuntimeInfo();
 
     @Override
     public void initialize(File configurationFile, StatsLogger statsLogger) throws IOException {
         this.config = readConfig(configurationFile);
         log.info("Pulsar driver configuration: {}", writer.writeValueAsString(config));
+        validateConfiguration(config);
 
         ClientBuilder clientBuilder =
                 PulsarClient.builder()
@@ -125,6 +135,8 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                                 config.producer.batchingMaxPublishDelayMs, TimeUnit.MILLISECONDS)
                         .batchingMaxMessages(Integer.MAX_VALUE)
                         .batchingMaxBytes(config.producer.batchingMaxBytes)
+                        .compressionType(config.producer.compressionType)
+                        .compressionMinMsgBodySize(config.producer.compressionMinMsgBodySize)
                         .blockIfQueueFull(config.producer.blockIfQueueFull)
                         .sendTimeout(0, TimeUnit.MILLISECONDS)
                         .maxPendingMessages(config.producer.pendingQueueSize);
@@ -149,15 +161,15 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
             }
             log.info("Created Pulsar tenant {} with allowed cluster {}", tenant, cluster);
 
-            this.namespace = config.client.namespacePrefix + "-" + getRandomString();
-            adminClient.namespaces().createNamespace(namespace);
-            log.info("Created Pulsar namespace {}", namespace);
+            this.namespace = buildNamespace(config);
+            initializeNamespaceIdentity(namespace, config.run);
+            log.info("Created or verified Pulsar namespace {}", namespace);
 
             PersistenceConfiguration p = config.client.persistence;
-            adminClient
-                    .namespaces()
-                    .setPersistence(
-                            namespace, new PersistencePolicies(p.ensembleSize, p.writeQuorum, p.ackQuorum, 1.0));
+            PersistencePolicies expected =
+                    new PersistencePolicies(
+                            p.ensembleSize, p.writeQuorum, p.ackQuorum, 1.0, p.managedLedgerStorageClassName);
+            applyAndVerifyPersistence(expected);
 
             adminClient
                     .namespaces()
@@ -169,6 +181,17 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                                     .retentionPolicy(RetentionPolicy.producer_exception)
                                     .build());
             adminClient.namespaces().setDeduplicationStatus(namespace, p.deduplicationEnabled);
+            Boolean actualDeduplication = adminClient.namespaces().getDeduplicationStatus(namespace);
+            if (!Objects.equals(Boolean.valueOf(p.deduplicationEnabled), actualDeduplication)) {
+                throw new IOException(
+                        "Namespace "
+                                + namespace
+                                + " deduplication mismatch: expected="
+                                + p.deduplicationEnabled
+                                + ", actual="
+                                + actualDeduplication);
+            }
+            runtimeInfo = buildRuntimeInfo(expected, actualDeduplication);
             log.info(
                     "Applied persistence configuration for namespace {}/{}/{}: {}",
                     tenant,
@@ -182,6 +205,47 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     }
 
     @Override
+    public DriverRuntimeInfo getRuntimeInfo() {
+        return runtimeInfo;
+    }
+
+    @Override
+    public CompletableFuture<Long> getSubscriptionBacklog(String topic, String subscriptionName) {
+        try {
+            PartitionedTopicMetadata metadata = adminClient.topics().getPartitionedTopicMetadata(topic);
+            if (metadata.partitions > 0) {
+                PartitionedTopicStats stats = adminClient.topics().getPartitionedStats(topic, true);
+                if (stats.getPartitions() == null || stats.getPartitions().isEmpty()) {
+                    throw new IllegalStateException("partitioned topic has no partition stats: " + topic);
+                }
+                long backlog = 0;
+                for (TopicStats partitionStats : stats.getPartitions().values()) {
+                    backlog += subscriptionBacklog(partitionStats, topic, subscriptionName);
+                }
+                return CompletableFuture.completedFuture(backlog);
+            }
+            return CompletableFuture.completedFuture(
+                    subscriptionBacklog(adminClient.topics().getStats(topic), topic, subscriptionName));
+        } catch (PulsarAdminException | RuntimeException e) {
+            CompletableFuture<Long> failed = new CompletableFuture<>();
+            failed.completeExceptionally(e);
+            return failed;
+        }
+    }
+
+    private static long subscriptionBacklog(
+            TopicStats topicStats, String topic, String subscriptionName) {
+        Map<String, ? extends SubscriptionStats> subscriptions = topicStats.getSubscriptions();
+        SubscriptionStats subscription =
+                subscriptions == null ? null : subscriptions.get(subscriptionName);
+        if (subscription == null) {
+            throw new IllegalStateException(
+                    "subscription " + subscriptionName + " is not present in topic stats " + topic);
+        }
+        return subscription.getMsgBacklog();
+    }
+
+    @Override
     public String getTopicNamePrefix() {
         return config.client.topicType + "://" + namespace + "/test";
     }
@@ -189,8 +253,7 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     @Override
     public CompletableFuture<Void> createTopic(String topic, int partitions) {
         if (partitions == 1) {
-            // No-op
-            return CompletableFuture.completedFuture(null);
+            return adminClient.topics().createNonPartitionedTopicAsync(topic);
         }
 
         return adminClient.topics().createPartitionedTopicAsync(topic, partitions);
@@ -244,7 +307,8 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                 .topic(topic)
                 .subscriptionName(subscriptionName)
                 .receiverQueueSize(config.consumer.receiverQueueSize)
-                .maxTotalReceiverQueueSizeAcrossPartitions(Integer.MAX_VALUE)
+                .maxTotalReceiverQueueSizeAcrossPartitions(
+                        config.consumer.maxTotalReceiverQueueSizeAcrossPartitions)
                 .poolMessages(true)
                 .subscribeAsync();
     }
@@ -317,6 +381,229 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
         return mapper.readValue(configurationFile, PulsarConfig.class);
     }
 
+    static void validateConfiguration(PulsarConfig config) {
+        if (config == null
+                || config.client == null
+                || config.client.namespacePrefix == null
+                || config.client.namespacePrefix.trim().isEmpty()) {
+            throw new IllegalArgumentException("client.namespacePrefix must be tenant/namespace");
+        }
+        if (config.client.persistence == null || config.producer == null || config.consumer == null) {
+            throw new IllegalArgumentException("client.persistence, producer and consumer are required");
+        }
+        String[] namespaceParts = config.client.namespacePrefix.split("/", -1);
+        if (namespaceParts.length != 2
+                || namespaceParts[0].trim().isEmpty()
+                || namespaceParts[1].trim().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "client.namespacePrefix must contain exactly two non-empty components: tenant/namespace");
+        }
+        if (config.client.namespaceSuffix != null && !isSafeRunId(config.client.namespaceSuffix)) {
+            throw new IllegalArgumentException("client.namespaceSuffix contains unsafe characters");
+        }
+        RunConfiguration run = config.run;
+        if (run != null) {
+            if (!run.isConfigured()) {
+                throw new IllegalArgumentException(
+                        "run requires campaignId, blockId, runId, stage, repetition and seed");
+            }
+            if (!isSafeRunId(run.runId) || run.runId.length() > 128) {
+                throw new IllegalArgumentException(
+                        "run.runId must be a safe value of at most 128 characters");
+            }
+            if (config.client.namespaceSuffix == null
+                    || !run.runId.equals(config.client.namespaceSuffix)) {
+                throw new IllegalArgumentException("run.runId must equal client.namespaceSuffix");
+            }
+            String stage = run.stage.toUpperCase();
+            if (!stage.matches("[ABCDE]")) {
+                throw new IllegalArgumentException("run.stage must be one of A, B, C, D or E");
+            }
+            String storageClass = config.client.persistence.managedLedgerStorageClassName;
+            boolean bookkeeper = "A".equals(stage) || "B".equals(stage);
+            String expected = bookkeeper ? "bookkeeper" : "nereus";
+            if (!expected.equals(storageClass)) {
+                throw new IllegalArgumentException(
+                        "stage " + stage + " requires managedLedgerStorageClassName=" + expected);
+            }
+        }
+    }
+
+    private static boolean isSafeRunId(String value) {
+        return value != null && value.matches("[A-Za-z0-9._-]+");
+    }
+
+    private static String buildNamespace(PulsarConfig config) {
+        String suffix = config.client.namespaceSuffix;
+        return config.client.namespacePrefix
+                + "-"
+                + (suffix == null || suffix.isEmpty() ? getRandomString() : suffix);
+    }
+
+    private void initializeNamespaceIdentity(String namespace, RunConfiguration run)
+            throws PulsarAdminException, IOException {
+        if (run == null) {
+            adminClient.namespaces().createNamespace(namespace);
+            return;
+        }
+
+        boolean created = false;
+        try {
+            adminClient.namespaces().createNamespace(namespace);
+            created = true;
+        } catch (ConflictException e) {
+            log.info("Namespace {} already exists; verifying run identity", namespace);
+        }
+
+        Map<String, String> expected = namespaceProperties(run);
+        if (created) {
+            adminClient.namespaces().setProperties(namespace, expected);
+            Map<String, String> actual = adminClient.namespaces().getProperties(namespace);
+            if (!expected.equals(actual)) {
+                throw new IOException(
+                        "Namespace "
+                                + namespace
+                                + " properties mismatch: expected="
+                                + expected
+                                + ", actual="
+                                + actual);
+            }
+            return;
+        }
+
+        PulsarAdminException last = null;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            try {
+                Map<String, String> actual = adminClient.namespaces().getProperties(namespace);
+                if (expected.equals(actual)) {
+                    return;
+                }
+                last =
+                        new PulsarAdminException(
+                                "Namespace "
+                                        + namespace
+                                        + " has run properties "
+                                        + actual
+                                        + ", expected "
+                                        + expected);
+            } catch (PulsarAdminException e) {
+                last = e;
+            }
+            sleepBeforeRetry(attempt);
+        }
+        throw new IOException("Namespace run identity did not converge for " + namespace, last);
+    }
+
+    private static Map<String, String> namespaceProperties(RunConfiguration run) {
+        Map<String, String> properties = new TreeMap<>();
+        properties.put("omb.schema-version", "1");
+        properties.put("omb.campaign-id", run.campaignId);
+        properties.put("omb.block-id", run.blockId);
+        properties.put("omb.run-id", run.runId);
+        properties.put("omb.stage", run.stage);
+        properties.put("omb.repetition", Integer.toString(run.repetition));
+        properties.put("omb.seed", Long.toString(run.seed));
+        return properties;
+    }
+
+    private void applyAndVerifyPersistence(PersistencePolicies expected)
+            throws PulsarAdminException, IOException {
+        PersistencePolicies actual = null;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            try {
+                adminClient.namespaces().setPersistence(namespace, expected);
+                actual = adminClient.namespaces().getPersistence(namespace);
+                if (verifyPersistencePolicy(expected, actual)) {
+                    return;
+                }
+            } catch (ConflictException e) {
+                log.info("Persistence policy update conflict for {}, retry {}", namespace, attempt + 1);
+            }
+            sleepBeforeRetry(attempt);
+        }
+        throw new IOException(
+                "Persistence policy mismatch for namespace "
+                        + namespace
+                        + ": expected="
+                        + expected
+                        + ", actual="
+                        + actual);
+    }
+
+    static boolean verifyPersistencePolicy(PersistencePolicies expected, PersistencePolicies actual) {
+        return actual != null
+                && expected.getBookkeeperEnsemble() == actual.getBookkeeperEnsemble()
+                && expected.getBookkeeperWriteQuorum() == actual.getBookkeeperWriteQuorum()
+                && expected.getBookkeeperAckQuorum() == actual.getBookkeeperAckQuorum()
+                && Double.compare(
+                                expected.getManagedLedgerMaxMarkDeleteRate(),
+                                actual.getManagedLedgerMaxMarkDeleteRate())
+                        == 0
+                && Objects.equals(
+                        expected.getManagedLedgerStorageClassName(), actual.getManagedLedgerStorageClassName());
+    }
+
+    private DriverRuntimeInfo buildRuntimeInfo(PersistencePolicies policy, Boolean deduplication) {
+        DriverRuntimeInfo info = new DriverRuntimeInfo();
+        info.run = config.run;
+        info.namespace = namespace;
+        info.attributes.put(
+                "persistence.bookkeeperEnsemble", Integer.toString(policy.getBookkeeperEnsemble()));
+        info.attributes.put(
+                "persistence.bookkeeperWriteQuorum", Integer.toString(policy.getBookkeeperWriteQuorum()));
+        info.attributes.put(
+                "persistence.bookkeeperAckQuorum", Integer.toString(policy.getBookkeeperAckQuorum()));
+        info.attributes.put(
+                "persistence.managedLedgerMaxMarkDeleteRate",
+                Double.toString(policy.getManagedLedgerMaxMarkDeleteRate()));
+        info.attributes.put(
+                "persistence.managedLedgerStorageClassName",
+                String.valueOf(policy.getManagedLedgerStorageClassName()));
+        info.attributes.put(
+                "persistence.expectedBookkeeperEnsemble",
+                Integer.toString(config.client.persistence.ensembleSize));
+        info.attributes.put(
+                "persistence.expectedBookkeeperWriteQuorum",
+                Integer.toString(config.client.persistence.writeQuorum));
+        info.attributes.put(
+                "persistence.expectedBookkeeperAckQuorum",
+                Integer.toString(config.client.persistence.ackQuorum));
+        info.attributes.put(
+                "persistence.expectedManagedLedgerStorageClassName",
+                String.valueOf(config.client.persistence.managedLedgerStorageClassName));
+        info.attributes.put("persistence.expectedManagedLedgerMaxMarkDeleteRate", "1.0");
+        info.attributes.put("namespace.deduplicationEnabled", String.valueOf(deduplication));
+        info.attributes.put(
+                "producer.compressionType", String.valueOf(config.producer.compressionType));
+        info.attributes.put(
+                "producer.compressionMinMsgBodySize",
+                Integer.toString(config.producer.compressionMinMsgBodySize));
+        info.attributes.put(
+                "producer.batchingEnabled", Boolean.toString(config.producer.batchingEnabled));
+        info.attributes.put(
+                "producer.batchingMaxPublishDelayMs",
+                Integer.toString(config.producer.batchingMaxPublishDelayMs));
+        info.attributes.put(
+                "producer.batchingMaxBytes", Integer.toString(config.producer.batchingMaxBytes));
+        info.attributes.put(
+                "consumer.subscriptionType", String.valueOf(config.consumer.subscriptionType));
+        info.attributes.put(
+                "consumer.receiverQueueSize", Integer.toString(config.consumer.receiverQueueSize));
+        info.attributes.put(
+                "consumer.maxTotalReceiverQueueSizeAcrossPartitions",
+                Integer.toString(config.consumer.maxTotalReceiverQueueSizeAcrossPartitions));
+        return info;
+    }
+
+    private static void sleepBeforeRetry(int attempt) throws IOException {
+        try {
+            Thread.sleep(Math.min(1000L, 100L << Math.min(attempt, 3)));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for Pulsar metadata to converge", e);
+        }
+    }
+
     private static final Random random = new Random();
 
     private static String getRandomString() {
@@ -326,5 +613,5 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     }
 
     private static final ObjectWriter writer = new ObjectMapper().writerWithDefaultPrettyPrinter();
-    private static final Logger log = LoggerFactory.getLogger(PulsarBenchmarkProducer.class);
+    private static final Logger log = LoggerFactory.getLogger(PulsarBenchmarkDriver.class);
 }

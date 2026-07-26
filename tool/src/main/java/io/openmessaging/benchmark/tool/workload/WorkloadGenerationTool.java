@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.tool.workload;
 
-
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;

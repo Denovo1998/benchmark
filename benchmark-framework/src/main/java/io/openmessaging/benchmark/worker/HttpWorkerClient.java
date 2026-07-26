@@ -19,6 +19,7 @@ import static io.openmessaging.benchmark.worker.WorkerHandler.CREATE_CONSUMERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.CREATE_PRODUCERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.CREATE_TOPICS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.CUMULATIVE_LATENCIES;
+import static io.openmessaging.benchmark.worker.WorkerHandler.DRIVER_RUNTIME_INFO;
 import static io.openmessaging.benchmark.worker.WorkerHandler.INITIALIZE_DRIVER;
 import static io.openmessaging.benchmark.worker.WorkerHandler.PAUSE_CONSUMERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.PERIOD_STATS;
@@ -27,12 +28,14 @@ import static io.openmessaging.benchmark.worker.WorkerHandler.RESET_STATS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.RESUME_CONSUMERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.START_LOAD;
 import static io.openmessaging.benchmark.worker.WorkerHandler.STOP_ALL;
+import static io.openmessaging.benchmark.worker.WorkerHandler.SUBSCRIPTION_BACKLOG;
 import static org.asynchttpclient.Dsl.asyncHttpClient;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.google.common.base.Preconditions;
 import io.openmessaging.benchmark.Workload;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CreateProducersRequest;
@@ -43,6 +46,8 @@ import io.openmessaging.benchmark.worker.commands.TopicsInfo;
 import io.openmessaging.benchmark.worker.jackson.ObjectMappers;
 import java.io.File;
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.List;
@@ -72,6 +77,22 @@ public class HttpWorkerClient implements Worker {
     public void initializeDriver(File configurationFile) throws IOException {
         byte[] confFileContent = Files.readAllBytes(Paths.get(configurationFile.toString()));
         sendPost(INITIALIZE_DRIVER, confFileContent);
+    }
+
+    @Override
+    public DriverRuntimeInfo getDriverRuntimeInfo() throws IOException {
+        return get(DRIVER_RUNTIME_INFO, DriverRuntimeInfo.class);
+    }
+
+    @Override
+    public long getSubscriptionBacklog(String topic, String subscriptionName) throws IOException {
+        return get(
+                SUBSCRIPTION_BACKLOG
+                        + "?topic="
+                        + URLEncoder.encode(topic, StandardCharsets.UTF_8.name())
+                        + "&subscription="
+                        + URLEncoder.encode(subscriptionName, StandardCharsets.UTF_8.name()),
+                Long.class);
     }
 
     @SuppressWarnings("unchecked")

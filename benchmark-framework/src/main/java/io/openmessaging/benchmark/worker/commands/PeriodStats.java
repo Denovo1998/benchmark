@@ -25,6 +25,7 @@ public class PeriodStats {
 
     public long messagesReceived = 0;
     public long bytesReceived = 0;
+    public long inFlightSends = 0;
 
     public long totalMessagesSent = 0;
     public long totalMessageSendErrors = 0;
@@ -42,6 +43,7 @@ public class PeriodStats {
         result.bytesSent += this.bytesSent;
         result.messagesReceived += this.messagesReceived;
         result.bytesReceived += this.bytesReceived;
+        result.inFlightSends = this.inFlightSends;
         result.totalMessagesSent += this.totalMessagesSent;
         result.totalMessageSendErrors += this.totalMessageSendErrors;
         result.totalMessagesReceived += this.totalMessagesReceived;
@@ -54,6 +56,7 @@ public class PeriodStats {
         result.bytesSent += toAdd.bytesSent;
         result.messagesReceived += toAdd.messagesReceived;
         result.bytesReceived += toAdd.bytesReceived;
+        result.inFlightSends += toAdd.inFlightSends;
         result.totalMessagesSent += toAdd.totalMessagesSent;
         result.totalMessageSendErrors += toAdd.totalMessageSendErrors;
         result.totalMessagesReceived += toAdd.totalMessagesReceived;

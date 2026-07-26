@@ -13,14 +13,19 @@
  */
 package io.openmessaging.benchmark.utils.distributor;
 
-
 import javax.annotation.concurrent.ThreadSafe;
 
 @ThreadSafe
 public class RandomNano extends KeyDistributor {
 
+    public RandomNano() {}
+
+    public RandomNano(long seed) {
+        super(seed);
+    }
+
     public String next() {
-        int randomIndex = Math.abs((int) System.nanoTime() % getLength());
+        int randomIndex = random.nextInt(getLength());
         return get(randomIndex);
     }
 }

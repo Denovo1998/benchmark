@@ -13,11 +13,15 @@
  */
 package io.openmessaging.benchmark.driver.pulsar;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import io.openmessaging.benchmark.driver.ProducerOptions;
+import io.openmessaging.benchmark.driver.RunConfiguration;
+import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
 import org.apache.pulsar.client.api.SubscriptionType;
+import org.apache.pulsar.common.policies.data.PersistencePolicies;
 import org.junit.jupiter.api.Test;
 
 class PulsarBenchmarkDriverTest {
@@ -63,5 +67,76 @@ class PulsarBenchmarkDriverTest {
                                         options, SubscriptionType.Failover))
                 .withMessageContaining("Shared or Key_Shared")
                 .withMessageContaining("Failover");
+    }
+
+    @Test
+    void shouldComparePersistenceStorageClassByValue() {
+        PersistencePolicies expected = new PersistencePolicies(3, 3, 2, 1.0, "nereus");
+        PersistencePolicies actual = new PersistencePolicies(3, 3, 2, 1.0, new String("nereus"));
+
+        assertThat(PulsarBenchmarkDriver.verifyPersistencePolicy(expected, actual)).isTrue();
+    }
+
+    @Test
+    void shouldRejectAnyPersistenceFieldMismatch() {
+        PersistencePolicies expected = new PersistencePolicies(3, 3, 2, 1.0, "bookkeeper");
+        assertThat(
+                        PulsarBenchmarkDriver.verifyPersistencePolicy(
+                                expected, new PersistencePolicies(2, 3, 2, 1.0, "bookkeeper")))
+                .isFalse();
+        assertThat(
+                        PulsarBenchmarkDriver.verifyPersistencePolicy(
+                                expected, new PersistencePolicies(3, 2, 2, 1.0, "bookkeeper")))
+                .isFalse();
+        assertThat(
+                        PulsarBenchmarkDriver.verifyPersistencePolicy(
+                                expected, new PersistencePolicies(3, 3, 1, 1.0, "bookkeeper")))
+                .isFalse();
+        assertThat(
+                        PulsarBenchmarkDriver.verifyPersistencePolicy(
+                                expected, new PersistencePolicies(3, 3, 2, 2.0, "bookkeeper")))
+                .isFalse();
+        assertThat(
+                        PulsarBenchmarkDriver.verifyPersistencePolicy(
+                                expected, new PersistencePolicies(3, 3, 2, 1.0, "nereus")))
+                .isFalse();
+    }
+
+    @Test
+    void shouldRequireStageStorageClassMapping() {
+        PulsarConfig config = formalConfig("C", "nereus");
+
+        assertThatCode(() -> PulsarBenchmarkDriver.validateConfiguration(config))
+                .doesNotThrowAnyException();
+
+        config.client.persistence.managedLedgerStorageClassName = "bookkeeper";
+        assertThatIllegalArgumentException()
+                .isThrownBy(() -> PulsarBenchmarkDriver.validateConfiguration(config))
+                .withMessageContaining("stage C")
+                .withMessageContaining("nereus");
+    }
+
+    @Test
+    void shouldAcceptBothBookkeeperAndNereusStageMappings() {
+        assertThatCode(
+                        () -> PulsarBenchmarkDriver.validateConfiguration(formalConfig("A", "bookkeeper")))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> PulsarBenchmarkDriver.validateConfiguration(formalConfig("E", "nereus")))
+                .doesNotThrowAnyException();
+    }
+
+    private static PulsarConfig formalConfig(String stage, String storageClass) {
+        PulsarConfig config = new PulsarConfig();
+        config.client.namespacePrefix = "benchmark/v010";
+        config.client.namespaceSuffix = "run-01";
+        config.client.persistence.managedLedgerStorageClassName = storageClass;
+        config.run = new RunConfiguration();
+        config.run.campaignId = "campaign";
+        config.run.blockId = "block";
+        config.run.runId = "run-01";
+        config.run.stage = stage;
+        config.run.repetition = 1;
+        config.run.seed = 1L;
+        return config;
     }
 }

@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.worker;
 
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.google.common.io.Files;
@@ -34,6 +33,8 @@ import org.slf4j.LoggerFactory;
 public class WorkerHandler {
 
     public static final String INITIALIZE_DRIVER = "/initialize-driver";
+    public static final String DRIVER_RUNTIME_INFO = "/driver-runtime-info";
+    public static final String SUBSCRIPTION_BACKLOG = "/subscription-backlog";
     public static final String CREATE_TOPICS = "/create-topics";
     public static final String CREATE_PRODUCERS = "/create-producers";
     public static final String PROBE_PRODUCERS = "/probe-producers";
@@ -53,6 +54,8 @@ public class WorkerHandler {
         this.localWorker = new LocalWorker(statsLogger);
 
         app.post(INITIALIZE_DRIVER, this::handleInitializeDriver);
+        app.get(DRIVER_RUNTIME_INFO, this::handleDriverRuntimeInfo);
+        app.get(SUBSCRIPTION_BACKLOG, this::handleSubscriptionBacklog);
         app.post(CREATE_TOPICS, this::handleCreateTopics);
         app.post(CREATE_PRODUCERS, this::handleCreateProducers);
         app.post(PROBE_PRODUCERS, this::handleProbeProducers);
@@ -82,6 +85,20 @@ public class WorkerHandler {
         log.info("Received create topics request for topics: {}", ctx.body());
         List<String> topics = localWorker.createTopics(topicsInfo);
         ctx.result(writer.writeValueAsString(topics));
+    }
+
+    private void handleDriverRuntimeInfo(Context ctx) throws Exception {
+        ctx.result(writer.writeValueAsString(localWorker.getDriverRuntimeInfo()));
+    }
+
+    private void handleSubscriptionBacklog(Context ctx) throws Exception {
+        String topic = ctx.queryParam("topic");
+        String subscription = ctx.queryParam("subscription");
+        if (topic == null || topic.isEmpty() || subscription == null || subscription.isEmpty()) {
+            ctx.status(400).result("topic and subscription query parameters are required");
+            return;
+        }
+        ctx.result(writer.writeValueAsString(localWorker.getSubscriptionBacklog(topic, subscription)));
     }
 
     private void handleCreateProducers(Context ctx) throws Exception {
@@ -114,10 +131,17 @@ public class WorkerHandler {
         ProducerWorkAssignment producerWorkAssignment =
                 mapper.readValue(ctx.body(), ProducerWorkAssignment.class);
 
+        int payloadSize =
+                producerWorkAssignment.payloadSpec != null
+                        ? producerWorkAssignment.payloadSpec.messageSize
+                        : producerWorkAssignment.payloadData == null
+                                ? 0
+                                : producerWorkAssignment.payloadData.get(0).length;
+
         log.info(
                 "Start load publish-rate: {} msg/s -- payload-size: {}",
                 producerWorkAssignment.publishRate,
-                producerWorkAssignment.payloadData.get(0).length);
+                payloadSize);
 
         localWorker.startLoad(producerWorkAssignment);
     }

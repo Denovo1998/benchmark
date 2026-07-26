@@ -25,7 +25,7 @@
 
     <artifactId>driver-pulsar</artifactId>
     <properties>
-        <pulsar.version>4.0.8</pulsar.version>
+        <pulsar.version>5.0.0-M1</pulsar.version>
     </properties>
 
     <dependencies>

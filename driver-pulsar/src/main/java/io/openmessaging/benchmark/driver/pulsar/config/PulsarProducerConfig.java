@@ -13,12 +13,17 @@
  */
 package io.openmessaging.benchmark.driver.pulsar.config;
 
+import org.apache.pulsar.client.api.CompressionType;
+
 public class PulsarProducerConfig {
     public boolean batchingEnabled = true;
     public int batchingMaxPublishDelayMs = 1;
     public int batchingMaxBytes = 1024 * 1024;
+    public CompressionType compressionType = CompressionType.NONE;
+    public int compressionMinMsgBodySize = 0;
     public boolean blockIfQueueFull = true;
     public int pendingQueueSize = 0;
+
     /** Fixed broker-side delivery delay for all messages, in milliseconds. */
     public long messageDelayMs = 0;
 

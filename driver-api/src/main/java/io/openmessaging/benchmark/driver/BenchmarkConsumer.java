@@ -13,4 +13,16 @@
  */
 package io.openmessaging.benchmark.driver;
 
-public interface BenchmarkConsumer extends AutoCloseable {}
+import java.io.IOException;
+
+public interface BenchmarkConsumer extends AutoCloseable {
+    /** Pause delivery while retaining the subscription and its cursor. */
+    default void pause() throws IOException {
+        // Drivers that cannot pause natively retain the historical no-op behavior.
+    }
+
+    /** Resume delivery after a pause. */
+    default void resume() throws IOException {
+        // Drivers that cannot pause natively retain the historical no-op behavior.
+    }
+}

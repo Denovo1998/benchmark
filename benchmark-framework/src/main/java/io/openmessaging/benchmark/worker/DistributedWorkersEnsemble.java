@@ -21,7 +21,9 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import io.openmessaging.benchmark.Workload;
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
 import io.openmessaging.benchmark.utils.ListPartition;
+import io.openmessaging.benchmark.utils.SeedDerivation;
 import io.openmessaging.benchmark.worker.commands.ConsumerAssignment;
 import io.openmessaging.benchmark.worker.commands.CountersStats;
 import io.openmessaging.benchmark.worker.commands.CumulativeLatencies;
@@ -31,8 +33,10 @@ import io.openmessaging.benchmark.worker.commands.TopicSubscription;
 import io.openmessaging.benchmark.worker.commands.TopicsInfo;
 import java.io.File;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,6 +92,76 @@ public class DistributedWorkersEnsemble implements Worker {
     }
 
     @Override
+    public DriverRuntimeInfo getDriverRuntimeInfo() throws IOException {
+        List<DriverRuntimeInfo> infos =
+                workers.parallelStream()
+                        .map(
+                                w -> {
+                                    try {
+                                        return w.getDriverRuntimeInfo();
+                                    } catch (IOException e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                })
+                        .collect(java.util.stream.Collectors.toList());
+        DriverRuntimeInfo leaderInfo = infos.get(0);
+        for (DriverRuntimeInfo info : infos) {
+            if (!runtimeInfoEquals(leaderInfo, info)) {
+                throw new IllegalStateException(
+                        "Distributed workers reported different driver runtime identities: "
+                                + leaderInfo.namespace
+                                + " vs "
+                                + info.namespace);
+            }
+        }
+        return leaderInfo;
+    }
+
+    @Override
+    public long getSubscriptionBacklog(String topic, String subscriptionName) throws IOException {
+        return leader.getSubscriptionBacklog(topic, subscriptionName);
+    }
+
+    /**
+     * Return the stable worker role assignment used for the current run.
+     *
+     * @return worker id to role mapping
+     */
+    public Map<String, String> getWorkerRoleAssignment() {
+        Map<String, String> roles = new LinkedHashMap<>();
+        for (Worker worker : producerWorkers) {
+            roles.put(worker.id(), "producer");
+        }
+        for (Worker worker : consumerWorkers) {
+            roles.put(worker.id(), "consumer");
+        }
+        return roles;
+    }
+
+    private static boolean runtimeInfoEquals(DriverRuntimeInfo left, DriverRuntimeInfo right) {
+        return Objects.equals(left.namespace, right.namespace)
+                && Objects.equals(left.attributes, right.attributes)
+                && runEquals(left.run, right.run);
+    }
+
+    private static boolean runEquals(
+            io.openmessaging.benchmark.driver.RunConfiguration left,
+            io.openmessaging.benchmark.driver.RunConfiguration right) {
+        if (left == right) {
+            return true;
+        }
+        if (left == null || right == null) {
+            return false;
+        }
+        return Objects.equals(left.campaignId, right.campaignId)
+                && Objects.equals(left.blockId, right.blockId)
+                && Objects.equals(left.runId, right.runId)
+                && Objects.equals(left.stage, right.stage)
+                && left.repetition == right.repetition
+                && Objects.equals(left.seed, right.seed);
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     public List<String> createTopics(TopicsInfo topicsInfo) throws IOException {
         return leader.createTopics(topicsInfo);
@@ -125,11 +199,20 @@ public class DistributedWorkersEnsemble implements Worker {
         double newRate = producerWorkAssignment.publishRate / numberOfUsedProducerWorkers;
         log.debug("Setting worker assigned publish rate to {} msgs/sec", newRate);
         // Reduce the publish rate across all the brokers
-        producerWorkers.parallelStream()
+        java.util.stream.IntStream.range(0, producerWorkers.size())
+                .parallel()
                 .forEach(
-                        w -> {
+                        index -> {
+                            Worker w = producerWorkers.get(index);
                             try {
-                                w.startLoad(producerWorkAssignment.withPublishRate(newRate));
+                                w.startLoad(
+                                        producerWorkAssignment
+                                                .withPublishRate(newRate)
+                                                .withPayloadSelectionSeed(
+                                                        SeedDerivation.derive(
+                                                                producerWorkAssignment.payloadSelectionSeed,
+                                                                "worker-payload-selection",
+                                                                index)));
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }

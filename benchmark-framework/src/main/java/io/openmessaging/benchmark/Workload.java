@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark;
 
-
 import io.openmessaging.benchmark.utils.distributor.KeyDistributorType;
 
 public class Workload {
@@ -51,6 +50,7 @@ public class Workload {
      * has drained all the backlog and it's on par with the producer
      */
     public long consumerBacklogSizeGB = 0;
+
     /**
      * The ratio of the backlog that can remain and yet the backlog still be considered empty, and
      * thus the workload can complete at the end of the configured duration. In some systems it is not
@@ -65,6 +65,9 @@ public class Workload {
     public int testDurationMinutes;
 
     public int warmupDurationMinutes = 1;
+
+    /** Sampling interval used by the run manifest and result samples. */
+    public int statsIntervalSeconds = 10;
 
     /** Fixed broker-side delivery delay for all messages, in milliseconds. */
     public long messageDelayMs = 0;
@@ -94,4 +97,37 @@ public class Workload {
      * minMessageDelayMs}, {@code maxMessageDelayMs}] instead of the fixed {@code messageDelayMs}.
      */
     public long maxMessageDelayMs = 0;
+
+    public void validate() {
+        if (topics <= 0 || partitionsPerTopic <= 0) {
+            throw new IllegalArgumentException("topics and partitionsPerTopic must be positive");
+        }
+        if (messageSize <= 0) {
+            throw new IllegalArgumentException("messageSize must be positive");
+        }
+        if (subscriptionsPerTopic <= 0 || producersPerTopic <= 0 || consumerPerSubscription <= 0) {
+            throw new IllegalArgumentException("producer and consumer counts must be positive");
+        }
+        if (producerRate < 0 || testDurationMinutes < 0 || warmupDurationMinutes < 0) {
+            throw new IllegalArgumentException("durations and producerRate must not be negative");
+        }
+        if (statsIntervalSeconds <= 0) {
+            throw new IllegalArgumentException("statsIntervalSeconds must be positive");
+        }
+        if (useRandomizedPayloads) {
+            if (randomBytesRatio < 0.0 || randomBytesRatio > 1.0) {
+                throw new IllegalArgumentException("randomBytesRatio must be between 0 and 1");
+            }
+            if (randomizedPayloadPoolSize <= 0) {
+                throw new IllegalArgumentException("randomizedPayloadPoolSize must be positive");
+            }
+            if (payloadFile != null && !payloadFile.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "payloadFile must be empty when useRandomizedPayloads is enabled");
+            }
+        }
+        if (backlogDrainRatio < 0.0 || backlogDrainRatio > 1.0) {
+            throw new IllegalArgumentException("backlogDrainRatio must be between 0 and 1");
+        }
+    }
 }

@@ -25,6 +25,29 @@ import org.apache.bookkeeper.stats.StatsLogger;
 /** Base driver interface. */
 public interface BenchmarkDriver extends AutoCloseable {
     /**
+     * Return the effective runtime configuration observed by the driver.
+     *
+     * @return the runtime configuration evidence
+     */
+    default DriverRuntimeInfo getRuntimeInfo() {
+        return new DriverRuntimeInfo();
+    }
+
+    /**
+     * Read broker-reported backlog for one topic subscription.
+     *
+     * <p>Drivers that do not expose broker-side backlog statistics retain the backward-compatible
+     * {@code -1} result. Formal Pulsar backlog runs fail closed when this value is returned.
+     *
+     * @param topic topic whose subscription should be inspected
+     * @param subscriptionName subscription name
+     * @return a future containing message backlog, or {@code -1} when unsupported
+     */
+    default CompletableFuture<Long> getSubscriptionBacklog(String topic, String subscriptionName) {
+        return CompletableFuture.completedFuture(-1L);
+    }
+
+    /**
      * Driver implementation can use this method to initialize the client libraries, with the provided
      * configuration file.
      *

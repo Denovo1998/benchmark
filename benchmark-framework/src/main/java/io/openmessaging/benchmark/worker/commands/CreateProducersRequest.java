@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.worker.commands;
 
-
 import io.openmessaging.benchmark.Workload;
 import java.util.List;
 

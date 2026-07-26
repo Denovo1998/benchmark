@@ -20,10 +20,24 @@ metadata:
     app: {{ .Release.Name }}
     role: driver
 spec:
+  {{- with .Values.driverNodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.driverTolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.results.enabled }}
+  volumes:
+    - name: results
+      persistentVolumeClaim:
+        claimName: {{ required "results.existingClaim is required when results.enabled=true" .Values.results.existingClaim }}
+  {{- end }}
   containers:
     - name: {{ .Release.Name }}-driver
       imagePullPolicy: {{ .Values.imagePullPolicy }}
-      image: {{ .Values.image }}
+      image: {{ include "benchmark.image" . }}
       resources:
         limits:
           memory: {{ .Values.driverMemoryLimit }}
@@ -39,9 +53,14 @@ spec:
         - name: NUM_WORKERS
           value: "{{ .Values.numWorkers }}"
         - name: WORKERS
-          value: '{{ template "workers" . }}'
+          value: '{{ template "workers" (dict "values" .Values "release" .Release) }}'
         - name: HEAP_OPTS
           value: {{ .Values.driverHeapOpts | quote }}
+      {{- if .Values.results.enabled }}
+      volumeMounts:
+        - name: results
+          mountPath: {{ .Values.results.mountPath }}
+      {{- end }}
       command: ["sh", "-c"]
       args:
         - >

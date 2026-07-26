@@ -42,10 +42,15 @@ public class MessageProducer {
         final long intendedSendTime = rateLimiter.acquire();
         uninterruptibleSleepNs(intendedSendTime);
         final long sendTime = nanoClock.get();
-        producer
-                .sendAsync(key, payload)
-                .thenRun(() -> success(payload.length, intendedSendTime, sendTime))
-                .exceptionally(this::failure);
+        stats.recordProducerStarted();
+        try {
+            producer
+                    .sendAsync(key, payload)
+                    .thenRun(() -> success(payload.length, intendedSendTime, sendTime))
+                    .exceptionally(this::failure);
+        } catch (Throwable t) {
+            failure(t);
+        }
     }
 
     private void success(long payloadLength, long intendedSendTime, long sendTime) {

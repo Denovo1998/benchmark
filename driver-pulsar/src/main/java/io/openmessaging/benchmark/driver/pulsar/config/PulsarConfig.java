@@ -14,7 +14,10 @@
 
 package io.openmessaging.benchmark.driver.pulsar.config;
 
+import io.openmessaging.benchmark.driver.RunConfiguration;
+
 public class PulsarConfig {
+    public RunConfiguration run;
     public PulsarClientConfig client = new PulsarClientConfig();
     public PulsarProducerConfig producer = new PulsarProducerConfig();
     public PulsarConsumerConfig consumer = new PulsarConsumerConfig();

@@ -31,10 +31,21 @@ Create chart name and version as used by the chart label.
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
+{{- define "benchmark.image" -}}
+{{- if .Values.imageDigest -}}
+{{- if not (regexMatch "^sha256:[0-9a-fA-F]{64}$" .Values.imageDigest) -}}
+{{- fail "imageDigest must be an OCI sha256 digest" -}}
+{{- end -}}
+{{- printf "%s@%s" .Values.image .Values.imageDigest -}}
+{{- else -}}
+{{- .Values.image -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "workers" -}}
-{{- $nodeCount := .numWorkers | int }}
+{{- $nodeCount := .values.numWorkers | int }}
   {{- range $index0 := until $nodeCount -}}
     {{- $index1 := $index0 | add1 -}}
-http://benchmark-worker-{{ $index0 }}.benchmark-worker:8080{{ if ne $index1 $nodeCount }},{{ end }}
+http://{{ $.release.Name }}-worker-{{ $index0 }}.{{ $.release.Name }}-worker:8080{{ if ne $index1 $nodeCount }},{{ end }}
   {{- end -}}
 {{- end -}}

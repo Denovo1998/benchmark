@@ -13,13 +13,17 @@
  */
 package io.openmessaging.benchmark.worker.commands;
 
-
 import io.openmessaging.benchmark.utils.distributor.KeyDistributorType;
 import java.util.List;
 
 public class ProducerWorkAssignment {
 
+    /** Deprecated wire-compatible field; formal campaigns use payloadSpec. */
     public List<byte[]> payloadData;
+
+    public PayloadSpec payloadSpec;
+
+    public long payloadSelectionSeed;
 
     public double publishRate;
 
@@ -29,7 +33,15 @@ public class ProducerWorkAssignment {
         ProducerWorkAssignment copy = new ProducerWorkAssignment();
         copy.keyDistributorType = this.keyDistributorType;
         copy.payloadData = this.payloadData;
+        copy.payloadSpec = this.payloadSpec;
+        copy.payloadSelectionSeed = this.payloadSelectionSeed;
         copy.publishRate = publishRate;
+        return copy;
+    }
+
+    public ProducerWorkAssignment withPayloadSelectionSeed(long seed) {
+        ProducerWorkAssignment copy = withPublishRate(publishRate);
+        copy.payloadSelectionSeed = seed;
         return copy;
     }
 }

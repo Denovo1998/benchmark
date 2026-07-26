@@ -1,0 +1,56 @@
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Copy this template through scripts/nereus-benchmark/render-run-config.sh.
+name: Nereus-v0.1.0-${STAGE}-run
+driverClass: io.openmessaging.benchmark.driver.pulsar.PulsarBenchmarkDriver
+
+run:
+  campaignId: ${CAMPAIGN_ID}
+  blockId: ${BLOCK_ID}
+  runId: ${RUN_ID}
+  stage: ${STAGE}
+  repetition: ${REPETITION}
+  seed: ${SEED}
+
+client:
+  serviceUrl: ${PULSAR_SERVICE_URL:-pulsar://nereus-broker.pulsar.svc.cluster.local:6650}
+  httpUrl: ${PULSAR_HTTP_URL:-http://nereus-broker.pulsar.svc.cluster.local:8080}
+  ioThreads: 16
+  connectionsPerBroker: 8
+  clusterName: ${PULSAR_CLUSTER:-beijing-1-benchmark}
+  namespacePrefix: benchmark/v010
+  namespaceSuffix: ${RUN_ID}
+  topicType: persistent
+  persistence:
+    ensembleSize: 3
+    writeQuorum: 3
+    ackQuorum: 2
+    managedLedgerStorageClassName: ${STORAGE_CLASS}
+    deduplicationEnabled: false
+
+producer:
+  batchingEnabled: true
+  batchingMaxPublishDelayMs: 1
+  batchingMaxBytes: 131072
+  compressionType: NONE
+  compressionMinMsgBodySize: 0
+  blockIfQueueFull: true
+  pendingQueueSize: 0
+  delayMessageRatio: 0.0
+
+consumer:
+  receiverQueueSize: 1000
+  maxTotalReceiverQueueSizeAcrossPartitions: 48000
+  subscriptionType: Shared

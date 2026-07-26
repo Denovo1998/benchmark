@@ -19,6 +19,9 @@
 # - On a single physical node, set this to 1 (or a small number) to fit CPU/memory.
 numWorkers: 0
 image: openmessaging/openmessaging-benchmark:pulsar
+# Optional immutable OCI target digest. When set, Pods use image@digest rather
+# than the mutable tag above.
+imageDigest: ""
 # Use local node image when available; override to Always if you rely on registry updates.
 imagePullPolicy: IfNotPresent
 workload: workloads/1-topic-100-partitions-1kb-4p-4c-100k.yaml
@@ -30,6 +33,20 @@ driverMemoryLimit: 4Gi
 # Java heap options for the driver (OpenMessaging Benchmark).
 # Keep Xmx <= driverMemoryLimit to avoid JVM startup failures / OOM kills.
 driverHeapOpts: "-Xms2048m -Xmx2048m"
+
+# Formal campaigns pin driver and worker placement so the OMB side is identical
+# across A-E. Leave empty for the historical local chart behavior.
+driverNodeSelector: {}
+workerNodeSelector: {}
+driverTolerations: []
+workerTolerations: []
+
+# A PVC is required for formal run evidence. The driver writes result.json,
+# manifest.json and copied YAML inputs below this path.
+results:
+  enabled: false
+  existingClaim: ""
+  mountPath: /var/lib/omb/results
 #
 # To "pin" CPU usage, set requests == limits (Guaranteed QoS).
 # Examples:

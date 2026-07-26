@@ -13,8 +13,13 @@
  */
 package io.openmessaging.benchmark;
 
+import io.openmessaging.benchmark.driver.RunConfiguration;
+
 public class DriverConfiguration {
     public String name;
 
     public String driverClass;
+
+    /** Optional campaign identity. Formal Nereus runs must populate every field. */
+    public RunConfiguration run;
 }

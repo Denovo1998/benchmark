@@ -17,16 +17,19 @@ public class CountersStats {
     public long messagesSent;
     public long messagesReceived;
     public long messageSendErrors;
+    public long inFlightSends;
 
     public CountersStats plus(CountersStats toAdd) {
         CountersStats result = new CountersStats();
         result.messagesSent += this.messagesSent;
         result.messagesReceived += this.messagesReceived;
         result.messageSendErrors += this.messageSendErrors;
+        result.inFlightSends += this.inFlightSends;
 
         result.messagesSent += toAdd.messagesSent;
         result.messagesReceived += toAdd.messagesReceived;
         result.messageSendErrors += toAdd.messageSendErrors;
+        result.inFlightSends += toAdd.inFlightSends;
         return result;
     }
 }

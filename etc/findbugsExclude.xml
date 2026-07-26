@@ -15,7 +15,24 @@
 -->
 <FindBugsFilter>
   <Match>
+    <Class name="io.openmessaging.benchmark.driver.DriverRuntimeInfo" />
+  </Match>
+  <Match>
+    <Class name="io.openmessaging.benchmark.PeriodSample" />
+  </Match>
+  <Match>
+    <Class name="io.openmessaging.benchmark.RunManifest" />
+  </Match>
+  <Match>
+    <Class name="io.openmessaging.benchmark.utils.payload.PayloadPoolFactory" />
+    <Bug pattern="DMI_RANDOM_USED_ONLY_ONCE" />
+  </Match>
+  <Match>
     <Class name="io.openmessaging.benchmark.driver.pulsar.config.PulsarClientConfig$AuthenticationConfiguration" />
+    <Bug pattern="UWF_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD" />
+  </Match>
+  <Match>
+    <Class name="io.openmessaging.benchmark.driver.pulsar.config.PulsarClientConfig$PersistenceConfiguration" />
     <Bug pattern="UWF_UNWRITTEN_PUBLIC_OR_PROTECTED_FIELD" />
   </Match>
   <Match>

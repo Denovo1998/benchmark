@@ -13,13 +13,17 @@
  */
 package io.openmessaging.benchmark;
 
-
+import io.openmessaging.benchmark.driver.DriverRuntimeInfo;
+import io.openmessaging.benchmark.driver.RunConfiguration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 public class TestResult {
+    public RunConfiguration run;
+    public DriverRuntimeInfo runtimeInfo;
+    public List<PeriodSample> samples = new ArrayList<>();
     public String workload;
     public String driver;
     public long messageSize;
@@ -27,6 +31,23 @@ public class TestResult {
     public int partitions;
     public int producersPerTopic;
     public int consumersPerTopic;
+    public String payloadMode;
+    public int payloadMessageSize;
+    public double payloadRandomBytesRatio;
+    public int payloadPoolSize;
+    public long payloadSeed;
+    public String payloadSha256;
+    public String assignmentSha256;
+    public long requestedBacklogBytes;
+    public long backlogAtDrainStartMessages;
+    public double backlogBuildDurationSeconds;
+    public double backlogDrainDurationSeconds;
+    public double averageDrainRateMessagesPerSecond;
+    public double peakDrainRateMessagesPerSecond;
+    public long postDrainBacklogMessages;
+    public Long brokerBacklogAtDrainStartMessages;
+    public Long brokerBacklogAfterDrainMessages;
+    public String backlogPhase;
 
     public List<Double> publishRate = new ArrayList<>();
     public List<Double> publishErrorRate = new ArrayList<>();

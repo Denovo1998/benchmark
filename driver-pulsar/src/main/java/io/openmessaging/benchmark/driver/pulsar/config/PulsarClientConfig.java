@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.driver.pulsar.config;
 
-
 import org.apache.pulsar.common.naming.TopicDomain;
 
 public class PulsarClientConfig {
@@ -31,6 +30,9 @@ public class PulsarClientConfig {
 
     public String namespacePrefix;
 
+    /** Deterministic suffix for formal campaign namespaces. */
+    public String namespaceSuffix;
+
     public String clusterName;
 
     public TopicDomain topicType = TopicDomain.persistent;
@@ -41,6 +43,7 @@ public class PulsarClientConfig {
         public int ensembleSize = 3;
         public int writeQuorum = 3;
         public int ackQuorum = 2;
+        public String managedLedgerStorageClassName;
 
         public boolean deduplicationEnabled = false;
     }

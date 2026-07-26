@@ -33,10 +33,18 @@ spec:
         app: {{ .Release.Name }}
         component: worker
     spec:
+      {{- with .Values.workerNodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workerTolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: {{ .Release.Name }}-worker
           imagePullPolicy: {{ .Values.imagePullPolicy }}
-          image: {{ .Values.image }}
+          image: {{ include "benchmark.image" . }}
           {{- if or .Values.workersMemoryRequest .Values.workersMemoryLimit .Values.workersCpuRequest .Values.workersCpuLimit }}
           resources:
             limits:

@@ -13,7 +13,6 @@
  */
 package io.openmessaging.benchmark.driver.pulsar;
 
-
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ProducerOptions;
 import java.util.Optional;
