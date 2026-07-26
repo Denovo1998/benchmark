@@ -25,8 +25,8 @@ public class PulsarProducerConfig {
     /**
      * Ratio of messages that will be sent with broker-side delivery delay, between 0.0 and 1.0.
      *
-     * <p>A value of 0.0 means all messages are sent without delay. A value of 1.0 means all
-     * messages are delayed according to {@code messageDelayMs} or the random delay range.
+     * <p>A value of 0.0 means all messages are sent without delay. A value of 1.0 means all messages
+     * are delayed according to {@code messageDelayMs} or the random delay range.
      */
     public double delayMessageRatio = 0.0;
 

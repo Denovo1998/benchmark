@@ -12,15 +12,33 @@
 # limitations under the License.
 #
 
-numWorkers: 8
-image: openmessaging/openmessaging-benchmark:latest
-imagePullPolicy: Always
-workload: workloads/1-topic-16-partitions-1kb.yaml
+#
+# How many benchmark-worker pods to run.
+# Notes:
+# - 8 is a common default for generating higher load in a multi-node cluster.
+# - On a single physical node, set this to 1 (or a small number) to fit CPU/memory.
+numWorkers: 0
+image: openmessaging/openmessaging-benchmark:pulsar
+# Use local node image when available; override to Always if you rely on registry updates.
+imagePullPolicy: IfNotPresent
+workload: workloads/1-topic-100-partitions-1kb-4p-4c-100k.yaml
 driver: driver-pulsar/pulsar.yaml
 
 # Resource Configurations
-driverMemoryRequest: 512Mi
-driverMemoryLimit: 2048Mi
+driverMemoryRequest: 4Gi
+driverMemoryLimit: 4Gi
+# Java heap options for the driver (OpenMessaging Benchmark).
+# Keep Xmx <= driverMemoryLimit to avoid JVM startup failures / OOM kills.
+driverHeapOpts: "-Xms2048m -Xmx2048m"
+#
+# To "pin" CPU usage, set requests == limits (Guaranteed QoS).
+# Examples:
+#   driverCpuRequest: 500m
+#   driverCpuLimit: 500m
+#driverCpuRequest: 1000m
+#driverCpuLimit: 1000m
 
-#workersMemoryRequest: 512Mi
-#workersMemoryLimit: 2048Mi
+workersMemoryRequest: 4Gi
+workersMemoryLimit: 4Gi
+workersCpuRequest: 2000m
+workersCpuLimit: 2000m

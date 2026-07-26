@@ -17,6 +17,7 @@ This fork adds simple support for Pulsar broker-side delayed delivery. To run a 
   - `delayMessageRatio: 0.3` means ~30% of messages will be delayed (according to `messageDelayMs` or the random range) and the rest will be sent immediately.
   - `delayMessageRatio: 1.0` means all messages are delayed (equivalent to the original delayed-only workloads).
 - Workload YAMLs can also override these settings per workload by setting `messageDelayMs`, `minMessageDelayMs`, `maxMessageDelayMs` and `delayMessageRatio`.
+- Delayed delivery requires `consumer.subscriptionType: Shared` or `consumer.subscriptionType: Key_Shared`. The default `driver-pulsar/pulsar.yaml` uses `Failover`, and Pulsar dispatches delayed messages immediately for unsupported subscription types.
 - Then choose a workload YAML (for example `workloads/pulsar-delayed-1-topic-16-partitions-1kb.yaml`) and run the benchmark as usual.
 
 End-to-end latency metrics will include the configured delivery delay.

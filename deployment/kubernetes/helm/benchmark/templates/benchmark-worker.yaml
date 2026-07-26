@@ -37,12 +37,22 @@ spec:
         - name: {{ .Release.Name }}-worker
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           image: {{ .Values.image }}
-          {{- if .Values.workersMemoryRequest }}
+          {{- if or .Values.workersMemoryRequest .Values.workersMemoryLimit .Values.workersCpuRequest .Values.workersCpuLimit }}
           resources:
             limits:
+              {{- if .Values.workersMemoryLimit }}
               memory: {{ .Values.workersMemoryLimit }}
+              {{- end }}
+              {{- if .Values.workersCpuLimit }}
+              cpu: {{ .Values.workersCpuLimit }}
+              {{- end }}
             requests:
+              {{- if .Values.workersMemoryRequest }}
               memory: {{ .Values.workersMemoryRequest }}
+              {{- end }}
+              {{- if .Values.workersCpuRequest }}
+              cpu: {{ .Values.workersCpuRequest }}
+              {{- end }}
           {{- end }}
           command: ["sh", "-c"]
           args:

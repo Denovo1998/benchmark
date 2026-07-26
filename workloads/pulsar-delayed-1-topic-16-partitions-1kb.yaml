@@ -22,7 +22,7 @@ payloadFile: "payload/payload-1Kb.data"
 subscriptionsPerTopic: 1
 consumerPerSubscription: 1
 producersPerTopic: 1
-producerRate: 5000
+producerRate: 100000
 consumerBacklogSizeGB: 0
 testDurationMinutes: 15
 
@@ -31,9 +31,11 @@ testDurationMinutes: 15
 # messageDelayMs: 5000
 
 # Optional ratio of messages that will be sent with broker-side delivery delay, between 0.0 and 1.0.
-# delayMessageRatio: 1.0
+# Delayed delivery in Pulsar requires the driver config to use
+# consumer.subscriptionType: Shared or Key_Shared.
+delayMessageRatio: 1.0
 
 # Optional per-message random delay range in milliseconds. If maxMessageDelayMs > 0,
 # each message will be delayed by a random value in [minMessageDelayMs, maxMessageDelayMs].
-# minMessageDelayMs: 1000
-# maxMessageDelayMs: 10000
+minMessageDelayMs: 10000
+maxMessageDelayMs: 20000

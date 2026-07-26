@@ -12,7 +12,7 @@
 # limitations under the License.
 #
 
-name: Backlog for 200k rate 4 producers and 4 consumers on 1 topic / 100 partition
+name: 200k rate 4 producers and 4 consumers on 1 topic / 100 partition
 
 topics: 1
 partitionsPerTopic: 100
@@ -29,5 +29,5 @@ producersPerTopic: 4
 # Discover max-sustainable rate
 producerRate: 100000
 
-consumerBacklogSizeGB: 50
+consumerBacklogSizeGB: 0
 testDurationMinutes: 5

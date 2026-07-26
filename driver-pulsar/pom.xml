@@ -25,7 +25,7 @@
 
     <artifactId>driver-pulsar</artifactId>
     <properties>
-        <pulsar.version>2.11.0</pulsar.version>
+        <pulsar.version>4.0.8</pulsar.version>
     </properties>
 
     <dependencies>
@@ -42,6 +42,16 @@
             <groupId>org.apache.pulsar</groupId>
             <artifactId>pulsar-client-all</artifactId>
             <version>${pulsar.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

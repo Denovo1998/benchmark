@@ -27,6 +27,7 @@ import io.openmessaging.benchmark.driver.ConsumerCallback;
 import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarClientConfig.PersistenceConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
+import io.openmessaging.benchmark.driver.pulsar.config.PulsarProducerConfig;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -48,6 +49,7 @@ import org.apache.pulsar.client.api.ProducerBuilder;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SizeUnit;
+import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.common.policies.data.BacklogQuota;
 import org.apache.pulsar.common.policies.data.BacklogQuota.RetentionPolicy;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
@@ -197,21 +199,8 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     @Override
     public CompletableFuture<BenchmarkProducer> createProducer(
             String topic, ProducerOptions options) {
-        ProducerOptions effectiveOptions = new ProducerOptions();
-        effectiveOptions.messageDelayMs =
-                options.messageDelayMs > 0 ? options.messageDelayMs : config.producer.messageDelayMs;
-        effectiveOptions.delayMessageRatio =
-                options.delayMessageRatio > 0.0
-                        ? options.delayMessageRatio
-                        : config.producer.delayMessageRatio;
-        effectiveOptions.minMessageDelayMs =
-                options.minMessageDelayMs > 0
-                        ? options.minMessageDelayMs
-                        : config.producer.minMessageDelayMs;
-        effectiveOptions.maxMessageDelayMs =
-                options.maxMessageDelayMs > 0
-                        ? options.maxMessageDelayMs
-                        : config.producer.maxMessageDelayMs;
+        ProducerOptions effectiveOptions = getEffectiveProducerOptions(options, config.producer);
+        validateDelayedDeliveryConfiguration(effectiveOptions, config.consumer.subscriptionType);
 
         return producerBuilder
                 .topic(topic)
@@ -278,6 +267,51 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     private static final ObjectMapper mapper =
             new ObjectMapper(new YAMLFactory())
                     .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+    static ProducerOptions getEffectiveProducerOptions(
+            ProducerOptions options, PulsarProducerConfig producerConfig) {
+        ProducerOptions effectiveOptions = new ProducerOptions();
+        effectiveOptions.messageDelayMs =
+                options.messageDelayMs > 0 ? options.messageDelayMs : producerConfig.messageDelayMs;
+        effectiveOptions.delayMessageRatio =
+                options.delayMessageRatio > 0.0
+                        ? options.delayMessageRatio
+                        : producerConfig.delayMessageRatio;
+        effectiveOptions.minMessageDelayMs =
+                options.minMessageDelayMs > 0
+                        ? options.minMessageDelayMs
+                        : producerConfig.minMessageDelayMs;
+        effectiveOptions.maxMessageDelayMs =
+                options.maxMessageDelayMs > 0
+                        ? options.maxMessageDelayMs
+                        : producerConfig.maxMessageDelayMs;
+        return effectiveOptions;
+    }
+
+    static void validateDelayedDeliveryConfiguration(
+            ProducerOptions options, SubscriptionType subscriptionType) {
+        if (options.delayMessageRatio <= 0.0d) {
+            return;
+        }
+
+        if (options.messageDelayMs <= 0 && options.maxMessageDelayMs <= 0) {
+            throw new IllegalArgumentException(
+                    "Delayed delivery is enabled via delayMessageRatio > 0, but neither"
+                            + " messageDelayMs nor maxMessageDelayMs is set to a positive value.");
+        }
+
+        if (subscriptionType == SubscriptionType.Shared
+                || subscriptionType == SubscriptionType.Key_Shared) {
+            return;
+        }
+
+        throw new IllegalArgumentException(
+                "Pulsar delayed delivery requires consumer.subscriptionType to be Shared or"
+                        + " Key_Shared, but found "
+                        + subscriptionType
+                        + ". Pulsar dispatches delayed messages immediately for this"
+                        + " subscription type.");
+    }
 
     private static PulsarConfig readConfig(File configurationFile) throws IOException {
         return mapper.readValue(configurationFile, PulsarConfig.class);

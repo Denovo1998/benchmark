@@ -16,7 +16,7 @@
 FROM maven:3.9.9-eclipse-temurin-17 as build
 COPY . /benchmark
 WORKDIR /benchmark
-RUN mvn install
+RUN mvn install -T 2C -DskipTests
 
 # Create the benchmark image
 FROM eclipse-temurin:17
