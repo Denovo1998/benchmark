@@ -16,7 +16,9 @@
 FROM maven:3.9.9-eclipse-temurin-17 as build
 COPY . /benchmark
 WORKDIR /benchmark
-RUN mvn install -T 2C -DskipTests
+# Spotless is inherited by every Maven module and uses repository-scoped locks.
+# Running the reactor with -T can make sibling drivers contend for those locks.
+RUN mvn install -DskipTests
 
 # Create the benchmark image
 FROM eclipse-temurin:17
