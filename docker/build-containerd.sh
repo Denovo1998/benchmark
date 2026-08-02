@@ -18,6 +18,19 @@ set -euo pipefail
 image="${1:-openmessaging/openmessaging-benchmark:pulsar}"
 dockerfile="${DOCKERFILE:-docker/Dockerfile.build}"
 context="${CONTEXT:-.}"
+proxy_build_args=()
+
+append_proxy_build_arg() {
+  local variable_name="$1"
+  local variable_value="${!variable_name-}"
+  if [[ -n "${variable_value}" ]]; then
+    proxy_build_args+=(--build-arg "${variable_name}=${variable_value}")
+  fi
+}
+
+for proxy_variable in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
+  append_proxy_build_arg "${proxy_variable}"
+done
 
 if command -v nerdctl >/dev/null 2>&1; then
   # Default to the Kubernetes (CRI) namespace so images are visible to K8s.
@@ -28,7 +41,11 @@ if command -v nerdctl >/dev/null 2>&1; then
   if [[ -n "${namespace}" ]]; then
     ns_args=(-n "${namespace}")
   fi
-  exec nerdctl "${ns_args[@]}" build -t "${image}" -f "${dockerfile}" "${context}"
+  exec nerdctl "${ns_args[@]}" build \
+    "${proxy_build_args[@]}" \
+    -t "${image}" \
+    -f "${dockerfile}" \
+    "${context}"
 fi
 
 if command -v buildctl >/dev/null 2>&1; then
@@ -39,12 +56,20 @@ if command -v buildctl >/dev/null 2>&1; then
   out_dir="${OUT_DIR:-docker/out}"
   mkdir -p "${out_dir}"
   oci_tar="${OCI_TAR:-${out_dir}/$(echo "${image}" | tr '/:' '__').oci.tar}"
+  proxy_buildkit_opts=()
+  for proxy_variable in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
+    proxy_value="${!proxy_variable-}"
+    if [[ -n "${proxy_value}" ]]; then
+      proxy_buildkit_opts+=(--opt "build-arg:${proxy_variable}=${proxy_value}")
+    fi
+  done
 
   buildctl --addr "${addr}" build \
     --frontend dockerfile.v0 \
     --local context="${context}" \
     --local dockerfile="${context}" \
     --opt filename="${dockerfile}" \
+    "${proxy_buildkit_opts[@]}" \
     --output "type=oci,dest=${oci_tar}"
 
   echo "built OCI archive: ${oci_tar}"

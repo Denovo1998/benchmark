@@ -29,3 +29,13 @@ This Dockerfile has no dependency (you do not need Maven to be installed locally
 #> docker build -t openmessaging-benchmark:latest . -f docker/Dockerfile.build
 ```
 
+When the build host uses an HTTP proxy, export `HTTP_PROXY`, `HTTPS_PROXY`,
+and `NO_PROXY` before invoking the containerd build helper. Set proxy
+variables are forwarded to Dockerfile build stages so Maven and apt can use
+the same route:
+
+```bash
+export HTTP_PROXY=http://<build-host-reachable-proxy>:<port>
+export HTTPS_PROXY="${HTTP_PROXY}"
+export NO_PROXY=localhost,127.0.0.1
+```
