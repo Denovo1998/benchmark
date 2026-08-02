@@ -420,6 +420,13 @@ Pulsar `v5.0.0-M1` Java artifacts 以 Java 17 编译；当前 OMB build/runtime
 `runtime` scope，确保例如 `slog` 进入最终 `lib/`。只使用 `compile` scope 会让
 worker 在初始化 Pulsar client 时出现 `NoClassDefFoundError`。
 
+`pulsar-client-all:5.0.0-M1` 还声明未 shading 的
+`com.fasterxml.jackson.core:jackson-annotations:2.21`。OMB 原有的全局
+`jackson.version=2.13.2` 不能覆盖这个运行时依赖，否则 Pulsar shaded databind
+在 admin 初始化阶段会找不到 `JsonSerializeAs`。因此 annotations 单独由
+`jackson.annotations.version=2.21` 管理；最终归档只能包含 2.21，不能回落到
+2.13.2。
+
 构建证据必须保留：
 
 ```bash
@@ -434,6 +441,12 @@ mvn -pl driver-pulsar -am dependency:tree \
 ```bash
 tar -tzf package/target/openmessaging-benchmark-*-bin.tar.gz \
   | grep '/lib/io.github.merlimat.slog-slog-'
+
+tar -tzf package/target/openmessaging-benchmark-*-bin.tar.gz \
+  | grep '/lib/com.fasterxml.jackson.core-jackson-annotations-2.21.jar'
+
+! tar -tzf package/target/openmessaging-benchmark-*-bin.tar.gz \
+  | grep -q '/lib/com.fasterxml.jackson.core-jackson-annotations-2.13.2.jar'
 ```
 
 ## 7.4 PersistenceConfiguration
