@@ -74,7 +74,8 @@
 		<dependencySet>
 			<outputDirectory>lib</outputDirectory>
 			<unpack>false</unpack>
-			<scope>compile</scope>
+			<!-- Include runtime dependencies declared by client-all (for example slog). -->
+			<scope>runtime</scope>
 			<useProjectArtifact>false</useProjectArtifact>
 			<!-- Include 'groupId' in the dependencies Jar names to better identify 
 				the provenance of the jar -->

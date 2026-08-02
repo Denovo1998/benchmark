@@ -415,6 +415,11 @@ WorkloadGenerator(
 Pulsar `v5.0.0-M1` Java artifacts 以 Java 17 编译；当前 OMB build/runtime
 镜像已使用 Eclipse Temurin 17，不应降回 Java 8 runtime。
 
+`pulsar-client-all` 的部分依赖以 `runtime` scope 声明，并由其 manifest 的
+`Class-Path` 引用；因此 `package/src/assemble/bin.xml` 的 dependency set 必须使用
+`runtime` scope，确保例如 `slog` 进入最终 `lib/`。只使用 `compile` scope 会让
+worker 在初始化 Pulsar client 时出现 `NoClassDefFoundError`。
+
 构建证据必须保留：
 
 ```bash
@@ -423,6 +428,13 @@ mvn -pl driver-pulsar -am dependency:tree \
 ```
 
 输出中不能同时存在 4.x、2.x 或 `5.0.0-M1-SNAPSHOT` Pulsar client。
+
+发行包还应检查 runtime 依赖已进入归档：
+
+```bash
+tar -tzf package/target/openmessaging-benchmark-*-bin.tar.gz \
+  | grep '/lib/io.github.merlimat.slog-slog-'
+```
 
 ## 7.4 PersistenceConfiguration
 
