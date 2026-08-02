@@ -11,7 +11,8 @@ You can use either of the Dockerfiles - `./docker/Dockerfile` or `./docker/Docke
 
 ### `Dockerfile`
 
-Uses `eclipse-temurin:17` and takes `BENCHMARK_TARBALL` as an argument.
+Uses the pinned `eclipse-temurin:17` image and takes `BENCHMARK_TARBALL` as an
+argument.
 While using this Dockerfile, you will need to build the project locally **first**.
 
 ```
@@ -22,7 +23,10 @@ While using this Dockerfile, you will need to build the project locally **first*
 
 ### `Dockerfile.build`
 
-Uses the latest version of `maven` in order to build the project, and then uses `eclipse-temurin:17` as runtime.
+Uses the pinned Maven 3.9.9 / Temurin 17 build image to build the project, and
+then uses the pinned Temurin 17 image as runtime. The image manifest digests are
+kept in the Dockerfiles so an offline containerd build does not need to resolve
+mutable tags from Docker Hub.
 This Dockerfile has no dependency (you do not need Maven to be installed locally).
 
 ```

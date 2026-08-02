@@ -12,7 +12,7 @@
 # limitations under the License.
 #
 
-FROM eclipse-temurin:17
+FROM eclipse-temurin:17@sha256:068a8f9ae4b74d9a20de3ecca771ba1a6437f1d7a8a8ad6deaf9dbdd2274397a
 
 ARG BENCHMARK_TARBALL
 

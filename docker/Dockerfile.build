@@ -13,7 +13,7 @@
 #
 
 # Build the Project
-FROM maven:3.9.9-eclipse-temurin-17 as build
+FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS build
 COPY . /benchmark
 WORKDIR /benchmark
 # Spotless is inherited by every Maven module and uses repository-scoped locks.
@@ -21,7 +21,7 @@ WORKDIR /benchmark
 RUN mvn install -DskipTests
 
 # Create the benchmark image
-FROM eclipse-temurin:17
+FROM eclipse-temurin:17@sha256:068a8f9ae4b74d9a20de3ecca771ba1a6437f1d7a8a8ad6deaf9dbdd2274397a
 COPY --from=build /benchmark/package/target/openmessaging-benchmark-*-SNAPSHOT-bin.tar.gz /
 RUN mkdir /benchmark && tar -xzf openmessaging-benchmark-*-SNAPSHOT-bin.tar.gz -C /benchmark --strip=1
 RUN rm /openmessaging-benchmark-*-SNAPSHOT-bin.tar.gz
