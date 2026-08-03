@@ -577,7 +577,10 @@ Objects.equals(
 
 - 最多 10 次；
 - 初始间隔 100 ms，最大 1 s；
-- 只重试 `ConflictException`、暂时性 metadata version conflict，或回读尚未收敛；
+- 只重试 `ConflictException`、暂时性 metadata version conflict，或回读尚未收敛。
+  Nereus v0.1.0 的 namespace policy CAS 竞争可能以 HTTP 500 和
+  `NEREUS_NAMESPACE_POLICY_VERSION_CHANGED` 返回；OMB 必须只按这个精确
+  server error marker 把它归类为可重试 version conflict，不能重试任意 5xx；
 - 权限错误、非法 storage class、HTTP 4xx 和最终字段不匹配立即失败；
 - 最终异常同时打印 expected、actual、namespace 和 run ID。
 

@@ -68,6 +68,9 @@ import org.slf4j.LoggerFactory;
 
 public class PulsarBenchmarkDriver implements BenchmarkDriver {
 
+    private static final String NEREUS_NAMESPACE_POLICY_VERSION_CHANGED =
+            "NEREUS_NAMESPACE_POLICY_VERSION_CHANGED";
+
     private PulsarClient client;
     private PulsarAdmin adminClient;
 
@@ -516,7 +519,10 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                 if (verifyPersistencePolicy(expected, actual)) {
                     return;
                 }
-            } catch (ConflictException e) {
+            } catch (PulsarAdminException e) {
+                if (!isTransientPersistenceConflict(e)) {
+                    throw e;
+                }
                 log.info("Persistence policy update conflict for {}, retry {}", namespace, attempt + 1);
             }
             sleepBeforeRetry(attempt);
@@ -528,6 +534,21 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                         + expected
                         + ", actual="
                         + actual);
+    }
+
+    static boolean isTransientPersistenceConflict(PulsarAdminException exception) {
+        if (exception instanceof ConflictException) {
+            return true;
+        }
+        if (exception.getStatusCode() < 500 || exception.getStatusCode() >= 600) {
+            return false;
+        }
+        return containsNereusPolicyVersionMarker(exception.getHttpError())
+                || containsNereusPolicyVersionMarker(exception.getMessage());
+    }
+
+    private static boolean containsNereusPolicyVersionMarker(String value) {
+        return value != null && value.contains(NEREUS_NAMESPACE_POLICY_VERSION_CHANGED);
     }
 
     static boolean verifyPersistencePolicy(PersistencePolicies expected, PersistencePolicies actual) {

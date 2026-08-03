@@ -20,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.RunConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
+import org.apache.pulsar.client.admin.PulsarAdminException.ServerSideErrorException;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
 import org.junit.jupiter.api.Test;
@@ -99,6 +100,26 @@ class PulsarBenchmarkDriverTest {
         assertThat(
                         PulsarBenchmarkDriver.verifyPersistencePolicy(
                                 expected, new PersistencePolicies(3, 3, 2, 1.0, "nereus")))
+                .isFalse();
+    }
+
+    @Test
+    void shouldRetryNereusNamespacePolicyVersionConflictOnly() {
+        ServerSideErrorException versionChanged =
+                new ServerSideErrorException(
+                        new IllegalStateException("NEREUS_NAMESPACE_POLICY_VERSION_CHANGED"),
+                        "NEREUS_NAMESPACE_POLICY_VERSION_CHANGED",
+                        "NEREUS_NAMESPACE_POLICY_VERSION_CHANGED",
+                        500);
+        ServerSideErrorException unrelatedServerError =
+                new ServerSideErrorException(
+                        new IllegalStateException("unrelated server error"),
+                        "unrelated server error",
+                        "unrelated server error",
+                        500);
+
+        assertThat(PulsarBenchmarkDriver.isTransientPersistenceConflict(versionChanged)).isTrue();
+        assertThat(PulsarBenchmarkDriver.isTransientPersistenceConflict(unrelatedServerError))
                 .isFalse();
     }
 
