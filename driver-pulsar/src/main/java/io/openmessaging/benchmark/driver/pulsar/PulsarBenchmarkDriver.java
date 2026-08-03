@@ -68,6 +68,8 @@ import org.slf4j.LoggerFactory;
 
 public class PulsarBenchmarkDriver implements BenchmarkDriver {
 
+    private static final String OXIA_ADMIN_POLICY_ALREADY_EXISTS =
+            "key already exists: /admin/policies/";
     private static final String NEREUS_NAMESPACE_POLICY_VERSION_CHANGED =
             "NEREUS_NAMESPACE_POLICY_VERSION_CHANGED";
 
@@ -158,8 +160,12 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                                             .adminRoles(Collections.emptySet())
                                             .allowedClusters(Sets.newHashSet(cluster))
                                             .build());
-                } catch (ConflictException e) {
-                    // Ignore. This can happen when multiple workers are initializing at the same time
+                } catch (PulsarAdminException e) {
+                    if (!isConcurrentAdminCreateConflict(e)) {
+                        throw e;
+                    }
+                    // Multiple workers may race while creating the shared tenant.
+                    log.info("Pulsar tenant {} was created concurrently; continuing", tenant);
                 }
             }
             log.info("Created Pulsar tenant {} with allowed cluster {}", tenant, cluster);
@@ -454,7 +460,10 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
         try {
             adminClient.namespaces().createNamespace(namespace);
             created = true;
-        } catch (ConflictException e) {
+        } catch (PulsarAdminException e) {
+            if (!isConcurrentAdminCreateConflict(e)) {
+                throw e;
+            }
             log.info("Namespace {} already exists; verifying run identity", namespace);
         }
 
@@ -545,6 +554,21 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
         }
         return containsNereusPolicyVersionMarker(exception.getHttpError())
                 || containsNereusPolicyVersionMarker(exception.getMessage());
+    }
+
+    static boolean isConcurrentAdminCreateConflict(PulsarAdminException exception) {
+        if (exception instanceof ConflictException) {
+            return true;
+        }
+        if (exception.getStatusCode() < 500 || exception.getStatusCode() >= 600) {
+            return false;
+        }
+        return containsOxiaAdminPolicyAlreadyExistsMarker(exception.getHttpError())
+                || containsOxiaAdminPolicyAlreadyExistsMarker(exception.getMessage());
+    }
+
+    private static boolean containsOxiaAdminPolicyAlreadyExistsMarker(String value) {
+        return value != null && value.contains(OXIA_ADMIN_POLICY_ALREADY_EXISTS);
     }
 
     private static boolean containsNereusPolicyVersionMarker(String value) {

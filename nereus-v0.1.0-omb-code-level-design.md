@@ -137,8 +137,10 @@ ManagedLedger storage class。
 | `WorkloadGenerator` backlog                   | 后台异常只打印，build/drain 时间未写结果                                 | B1 不能作为可审计的 backlog 测试                               |
 
 另有一个分布式初始化约束：`DistributedWorkersEnsemble.initializeDriver()` 会并行让所有
-worker 初始化同一份 driver YAML。显式 namespace 后，各 worker 会同时创建同一个
-namespace。因此 namespace create 必须幂等处理 `ConflictException`，persistence
+worker 初始化同一份 driver YAML。显式 tenant/namespace 后，各 worker 会同时创建同一
+组资源。因此 tenant/namespace create 必须幂等处理标准 `ConflictException`，以及
+Oxia 可能把并发 create 映射成 HTTP 500 的精确 marker
+`key already exists: /admin/policies/`；任意其他 5xx 仍必须失败。persistence
 写入和回读也必须能容忍多个 worker 写入同一份相同配置。
 
 ---
@@ -495,7 +497,10 @@ Pulsar client 前完成格式校验。
 ```java
 try {
     adminClient.namespaces().createNamespace(namespace);
-} catch (ConflictException alreadyExists) {
+} catch (PulsarAdminException alreadyExists) {
+    if (!isConcurrentAdminCreateConflict(alreadyExists)) {
+        throw alreadyExists;
+    }
     log.info("Namespace {} already exists; verifying the shared run namespace", namespace);
 }
 ```

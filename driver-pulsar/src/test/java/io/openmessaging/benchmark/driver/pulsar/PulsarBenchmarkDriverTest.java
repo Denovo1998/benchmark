@@ -124,6 +124,26 @@ class PulsarBenchmarkDriverTest {
     }
 
     @Test
+    void shouldRecognizeOnlyOxiaAdminPolicyAlreadyExistsAsConcurrentCreateConflict() {
+        ServerSideErrorException oxiaAlreadyExists =
+                new ServerSideErrorException(
+                        new IllegalStateException("key already exists: /admin/policies/benchmark"),
+                        "key already exists: /admin/policies/benchmark",
+                        "key already exists: /admin/policies/benchmark",
+                        500);
+        ServerSideErrorException unrelatedAlreadyExists =
+                new ServerSideErrorException(
+                        new IllegalStateException("key already exists: /other/path"),
+                        "key already exists: /other/path",
+                        "key already exists: /other/path",
+                        500);
+
+        assertThat(PulsarBenchmarkDriver.isConcurrentAdminCreateConflict(oxiaAlreadyExists)).isTrue();
+        assertThat(PulsarBenchmarkDriver.isConcurrentAdminCreateConflict(unrelatedAlreadyExists))
+                .isFalse();
+    }
+
+    @Test
     void shouldRequireStageStorageClassMapping() {
         PulsarConfig config = formalConfig("C", "nereus");
 
