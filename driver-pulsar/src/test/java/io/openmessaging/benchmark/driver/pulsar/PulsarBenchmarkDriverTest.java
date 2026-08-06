@@ -150,8 +150,7 @@ class PulsarBenchmarkDriverTest {
                         PulsarBenchmarkDriver.isTopicNotReady(
                                 new PulsarClientException.TopicDoesNotExistException("topic")))
                 .isTrue();
-        assertThat(PulsarBenchmarkDriver.isTopicNotReady(new IllegalStateException("topic")))
-                .isFalse();
+        assertThat(PulsarBenchmarkDriver.isTopicNotReady(new IllegalStateException("topic"))).isFalse();
     }
 
     @Test

@@ -317,10 +317,7 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
     }
 
     private CompletableFuture<Consumer<ByteBuffer>> createInternalConsumer(
-            String topic,
-            String subscriptionName,
-            ConsumerCallback consumerCallback,
-            int attempt) {
+            String topic, String subscriptionName, ConsumerCallback consumerCallback, int attempt) {
         return client
                 .newConsumer(Schema.BYTEBUFFER)
                 .priorityLevel(0)
@@ -355,13 +352,9 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                             }
 
                             long delayMillis =
-                                    Math.min(
-                                            1000L,
-                                            TOPIC_NOT_READY_RETRY_DELAY_MILLIS
-                                                    << Math.min(attempt, 2));
+                                    Math.min(1000L, TOPIC_NOT_READY_RETRY_DELAY_MILLIS << Math.min(attempt, 2));
                             log.info(
-                                    "Pulsar topic {} is not ready; retrying consumer creation "
-                                            + "{}/{} after {} ms",
+                                    "Pulsar topic {} is not ready; retrying consumer creation " + "{}/{} after {} ms",
                                     topic,
                                     attempt + 1,
                                     TOPIC_NOT_READY_MAX_RETRIES,
@@ -370,18 +363,14 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                                     .thenCompose(
                                             ignored ->
                                                     createInternalConsumer(
-                                                            topic,
-                                                            subscriptionName,
-                                                            consumerCallback,
-                                                            attempt + 1));
+                                                            topic, subscriptionName, consumerCallback, attempt + 1));
                         })
                 .thenCompose(Function.identity());
     }
 
     private static CompletableFuture<Void> delayBeforeTopicRetry(long delayMillis) {
         CompletableFuture<Void> delay = new CompletableFuture<>();
-        TOPIC_RETRY_EXECUTOR.schedule(
-                () -> delay.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+        TOPIC_RETRY_EXECUTOR.schedule(() -> delay.complete(null), delayMillis, TimeUnit.MILLISECONDS);
         return delay;
     }
 
