@@ -43,8 +43,15 @@ if grep -Eq '^[[:space:]]*run:[[:space:]]*$' "$driver_yaml"; then
   export OMB_KUBERNETES_CONTEXT="${KUBERNETES_CONTEXT}"
   export OMB_KUBERNETES_NAMESPACE="${KUBERNETES_NAMESPACE}"
   export OMB_PULSAR_CLUSTER="${CLUSTER}"
-  export OMB_PULSAR_BROKER_IMAGE_ID="${NEREUS_IMAGE_TARGET_DIGEST:-${APACHE_IMAGE_TARGET_DIGEST:-}}"
-  export OMB_NEREUS_SOURCE_ID="${NEREUS_IMAGE_TARGET_DIGEST:-}"
+  if [[ "${STAGE}" == "A" ]]; then
+    # Stage A runs the Apache baseline broker; deployment env also carries the
+    # frozen Nereus image identity for the later stages.
+    export OMB_PULSAR_BROKER_IMAGE_ID="${APACHE_IMAGE_TARGET_DIGEST:-}"
+    export OMB_NEREUS_SOURCE_ID=""
+  else
+    export OMB_PULSAR_BROKER_IMAGE_ID="${NEREUS_IMAGE_TARGET_DIGEST:-}"
+    export OMB_NEREUS_SOURCE_ID="${NEREUS_IMAGE_TARGET_DIGEST:-}"
+  fi
   if [[ -z "${OMB_HELM_EVIDENCE_ARCHIVE:-}" && -n "${NEREUS_HELM_EVIDENCE_ARCHIVE:-}" ]]; then
     export OMB_HELM_EVIDENCE_ARCHIVE="$NEREUS_HELM_EVIDENCE_ARCHIVE"
   fi
