@@ -21,6 +21,7 @@ import io.openmessaging.benchmark.driver.ProducerOptions;
 import io.openmessaging.benchmark.driver.RunConfiguration;
 import io.openmessaging.benchmark.driver.pulsar.config.PulsarConfig;
 import org.apache.pulsar.client.admin.PulsarAdminException.ServerSideErrorException;
+import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.SubscriptionType;
 import org.apache.pulsar.common.policies.data.PersistencePolicies;
 import org.junit.jupiter.api.Test;
@@ -140,6 +141,16 @@ class PulsarBenchmarkDriverTest {
 
         assertThat(PulsarBenchmarkDriver.isConcurrentAdminCreateConflict(oxiaAlreadyExists)).isTrue();
         assertThat(PulsarBenchmarkDriver.isConcurrentAdminCreateConflict(unrelatedAlreadyExists))
+                .isFalse();
+    }
+
+    @Test
+    void shouldRetryOnlyTopicDoesNotExistFailures() {
+        assertThat(
+                        PulsarBenchmarkDriver.isTopicNotReady(
+                                new PulsarClientException.TopicDoesNotExistException("topic")))
+                .isTrue();
+        assertThat(PulsarBenchmarkDriver.isTopicNotReady(new IllegalStateException("topic")))
                 .isFalse();
     }
 

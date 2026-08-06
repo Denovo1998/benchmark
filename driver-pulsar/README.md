@@ -60,6 +60,12 @@ scripts/nereus-benchmark/run-case.sh \
   /tmp/omb-workers.yaml
 ```
 
+During consumer setup, the driver retries only Pulsar's
+`TopicDoesNotExistException` for a bounded period. This covers the short
+metadata-convergence window after an Oxia-backed partitioned topic is created;
+other setup errors still fail the run immediately, and the retry delay is
+outside the measured workload interval.
+
 For R1, keep the benchmark sample interval at one second, delete the selected
 owner broker with `inject-broker-crash.sh`, and pass the resulting event file to
 the analyzer. The injector records deletion and replacement-Ready timestamps;
@@ -165,4 +171,3 @@ TF_STATE=. ansible-playbook \
   -e @extra_vars.yaml \
   restart-brokers.yaml
 ```
-

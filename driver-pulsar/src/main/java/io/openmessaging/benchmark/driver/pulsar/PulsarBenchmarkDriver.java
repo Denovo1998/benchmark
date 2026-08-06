@@ -40,7 +40,10 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.apache.pulsar.client.admin.PulsarAdmin;
@@ -51,6 +54,7 @@ import org.apache.pulsar.client.api.ClientBuilder;
 import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.ProducerBuilder;
 import org.apache.pulsar.client.api.PulsarClient;
+import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.Schema;
 import org.apache.pulsar.client.api.SizeUnit;
 import org.apache.pulsar.client.api.SubscriptionType;
@@ -72,6 +76,15 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
             "key already exists: /admin/policies/";
     private static final String NEREUS_NAMESPACE_POLICY_VERSION_CHANGED =
             "NEREUS_NAMESPACE_POLICY_VERSION_CHANGED";
+    private static final int TOPIC_NOT_READY_MAX_RETRIES = 20;
+    private static final long TOPIC_NOT_READY_RETRY_DELAY_MILLIS = 250L;
+    private static final ScheduledExecutorService TOPIC_RETRY_EXECUTOR =
+            Executors.newSingleThreadScheduledExecutor(
+                    runnable -> {
+                        Thread thread = new Thread(runnable, "pulsar-topic-readiness-retry");
+                        thread.setDaemon(true);
+                        return thread;
+                    });
 
     private PulsarClient client;
     private PulsarAdmin adminClient;
@@ -300,6 +313,14 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
 
     CompletableFuture<Consumer<ByteBuffer>> createInternalConsumer(
             String topic, String subscriptionName, ConsumerCallback consumerCallback) {
+        return createInternalConsumer(topic, subscriptionName, consumerCallback, 0);
+    }
+
+    private CompletableFuture<Consumer<ByteBuffer>> createInternalConsumer(
+            String topic,
+            String subscriptionName,
+            ConsumerCallback consumerCallback,
+            int attempt) {
         return client
                 .newConsumer(Schema.BYTEBUFFER)
                 .priorityLevel(0)
@@ -319,7 +340,53 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                 .maxTotalReceiverQueueSizeAcrossPartitions(
                         config.consumer.maxTotalReceiverQueueSizeAcrossPartitions)
                 .poolMessages(true)
-                .subscribeAsync();
+                .subscribeAsync()
+                .handle(
+                        (consumer, error) -> {
+                            if (error == null) {
+                                return CompletableFuture.completedFuture(consumer);
+                            }
+
+                            Throwable cause = FutureUtil.unwrapCompletionException(error);
+                            if (!isTopicNotReady(cause) || attempt >= TOPIC_NOT_READY_MAX_RETRIES) {
+                                CompletableFuture<Consumer<ByteBuffer>> failed = new CompletableFuture<>();
+                                failed.completeExceptionally(cause);
+                                return failed;
+                            }
+
+                            long delayMillis =
+                                    Math.min(
+                                            1000L,
+                                            TOPIC_NOT_READY_RETRY_DELAY_MILLIS
+                                                    << Math.min(attempt, 2));
+                            log.info(
+                                    "Pulsar topic {} is not ready; retrying consumer creation "
+                                            + "{}/{} after {} ms",
+                                    topic,
+                                    attempt + 1,
+                                    TOPIC_NOT_READY_MAX_RETRIES,
+                                    delayMillis);
+                            return delayBeforeTopicRetry(delayMillis)
+                                    .thenCompose(
+                                            ignored ->
+                                                    createInternalConsumer(
+                                                            topic,
+                                                            subscriptionName,
+                                                            consumerCallback,
+                                                            attempt + 1));
+                        })
+                .thenCompose(Function.identity());
+    }
+
+    private static CompletableFuture<Void> delayBeforeTopicRetry(long delayMillis) {
+        CompletableFuture<Void> delay = new CompletableFuture<>();
+        TOPIC_RETRY_EXECUTOR.schedule(
+                () -> delay.complete(null), delayMillis, TimeUnit.MILLISECONDS);
+        return delay;
+    }
+
+    static boolean isTopicNotReady(Throwable error) {
+        return error instanceof PulsarClientException.TopicDoesNotExistException;
     }
 
     @Override
