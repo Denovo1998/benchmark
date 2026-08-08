@@ -18,6 +18,19 @@ import java.nio.ByteBuffer;
 /** Callback that the driver implementation calls when a message is received. */
 public interface ConsumerCallback {
     /**
+     * Driver should invoke this before exposing a delivery through {@link #messageReceived} when
+     * acknowledgement completion can be observed asynchronously.
+     */
+    default void messageAcknowledgementStarted() {}
+
+    /**
+     * Driver should invoke this exactly once after {@link #messageAcknowledgementStarted()}.
+     *
+     * @param error {@code null} when the acknowledgement completed successfully
+     */
+    default void messageAcknowledgementCompleted(Throwable error) {}
+
+    /**
      * Driver should invoke this method (or the ByteBuffer variant) once for each message received.
      *
      * @param payload the received message payload

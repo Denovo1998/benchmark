@@ -15,15 +15,38 @@ package io.openmessaging.benchmark.worker;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 class DistributedWorkersEnsembleTest {
+
+    @Test
+    void producerPauseAndResumeOnlyTargetProducerWorkers() throws Exception {
+        Worker producer = mock(Worker.class);
+        Worker consumer = mock(Worker.class);
+        when(producer.id()).thenReturn("producer");
+        when(consumer.id()).thenReturn("consumer");
+
+        try (DistributedWorkersEnsemble ensemble =
+                new DistributedWorkersEnsemble(Arrays.asList(producer, consumer), false)) {
+            ensemble.pauseProducers();
+            ensemble.resumeProducers();
+        }
+
+        verify(producer).pauseProducers();
+        verify(producer).resumeProducers();
+        verify(consumer, never()).pauseProducers();
+        verify(consumer, never()).resumeProducers();
+    }
 
     @ParameterizedTest
     @MethodSource("producerCountExpectations")

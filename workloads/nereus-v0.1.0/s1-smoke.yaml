@@ -22,8 +22,10 @@ randomizedPayloadPoolSize: 4096
 subscriptionsPerTopic: 1
 producersPerTopic: 1
 consumerPerSubscription: 1
-producerRate: 50000
+producerRate: 10000
 consumerBacklogSizeGB: 0
-warmupDurationMinutes: 1
-testDurationMinutes: 2
+warmupDurationMinutes: 2
+warmupDrainTimeoutSeconds: 300
+measurementDrainTimeoutSeconds: 300
+testDurationMinutes: 5
 statsIntervalSeconds: 1

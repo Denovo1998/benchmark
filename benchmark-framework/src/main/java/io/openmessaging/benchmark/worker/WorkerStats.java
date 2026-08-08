@@ -44,13 +44,21 @@ public class WorkerStats {
 
     private final LongAdder messagesReceived = new LongAdder();
     private final LongAdder bytesReceived = new LongAdder();
+    private final LongAdder messagesAcknowledged = new LongAdder();
+    private final LongAdder ackErrors = new LongAdder();
     private final Counter messagesReceivedCounter;
     private final Counter bytesReceivedCounter;
+    private final Counter messagesAcknowledgedCounter;
+    private final Counter ackErrorCounter;
 
     private final LongAdder totalMessagesSent = new LongAdder();
     private final LongAdder totalMessageSendErrors = new LongAdder();
     private final LongAdder totalMessagesReceived = new LongAdder();
+    private final LongAdder totalMessagesAcknowledged = new LongAdder();
+    private final LongAdder totalAckErrors = new LongAdder();
     private final LongAdder inFlightSends = new LongAdder();
+    private final LongAdder ackInFlight = new LongAdder();
+    private volatile boolean acknowledgementTrackingSupported;
 
     private static final long highestTrackableValue = TimeUnit.SECONDS.toMicros(60);
     private final Recorder publishLatencyRecorder = new Recorder(highestTrackableValue, 5);
@@ -74,6 +82,8 @@ public class WorkerStats {
         StatsLogger consumerStatsLogger = statsLogger.scope("consumer");
         this.messagesReceivedCounter = consumerStatsLogger.getCounter("messages_recv");
         this.bytesReceivedCounter = consumerStatsLogger.getCounter("bytes_recv");
+        this.messagesAcknowledgedCounter = consumerStatsLogger.getCounter("messages_acknowledged");
+        this.ackErrorCounter = consumerStatsLogger.getCounter("ack_errors");
         this.endToEndLatencyStats = consumerStatsLogger.getOpStatsLogger("e2e_latency");
     }
 
@@ -81,8 +91,12 @@ public class WorkerStats {
         return statsLogger;
     }
 
-    public void recordMessageSent() {
-        totalMessagesSent.increment();
+    public void recordProbeSuccess() {
+        try {
+            totalMessagesSent.increment();
+        } finally {
+            inFlightSends.decrement();
+        }
     }
 
     public void recordMessageReceived(long payloadLength, long endToEndLatencyMicros) {
@@ -108,11 +122,17 @@ public class WorkerStats {
 
         stats.messagesReceived = messagesReceived.sumThenReset();
         stats.bytesReceived = bytesReceived.sumThenReset();
+        stats.messagesAcknowledged = messagesAcknowledged.sumThenReset();
+        stats.ackErrors = ackErrors.sumThenReset();
 
         stats.totalMessagesSent = totalMessagesSent.sum();
         stats.totalMessageSendErrors = totalMessageSendErrors.sum();
         stats.totalMessagesReceived = totalMessagesReceived.sum();
+        stats.totalMessagesAcknowledged = totalMessagesAcknowledged.sum();
+        stats.totalAckErrors = totalAckErrors.sum();
         stats.inFlightSends = inFlightSends.sum();
+        stats.ackInFlight = ackInFlight.sum();
+        stats.acknowledgementTrackingSupported = acknowledgementTrackingSupported;
 
         stats.publishLatency = publishLatencyRecorder.getIntervalHistogram();
         stats.publishDelayLatency = publishDelayLatencyRecorder.getIntervalHistogram();
@@ -130,10 +150,18 @@ public class WorkerStats {
 
     public CountersStats toCountersStats() throws IOException {
         CountersStats stats = new CountersStats();
+        long inFlightSendsBefore = inFlightSends.sum();
+        long ackInFlightBefore = ackInFlight.sum();
         stats.messagesSent = totalMessagesSent.sum();
         stats.messageSendErrors = totalMessageSendErrors.sum();
         stats.messagesReceived = totalMessagesReceived.sum();
-        stats.inFlightSends = inFlightSends.sum();
+        stats.messagesAcknowledged = totalMessagesAcknowledged.sum();
+        stats.ackErrors = totalAckErrors.sum();
+        long ackInFlightAfter = ackInFlight.sum();
+        long inFlightSendsAfter = inFlightSends.sum();
+        stats.inFlightSends = Math.max(inFlightSendsBefore, inFlightSendsAfter);
+        stats.ackInFlight = Math.max(ackInFlightBefore, ackInFlightAfter);
+        stats.acknowledgementTrackingSupported = acknowledgementTrackingSupported;
         return stats;
     }
 
@@ -146,7 +174,7 @@ public class WorkerStats {
         endToEndCumulativeLatencyRecorder.reset();
     }
 
-    public void reset() {
+    public void resetMeasurement() {
         resetLatencies();
 
         messagesSent.reset();
@@ -154,41 +182,81 @@ public class WorkerStats {
         bytesSent.reset();
         messagesReceived.reset();
         bytesReceived.reset();
+        messagesAcknowledged.reset();
+        ackErrors.reset();
         totalMessagesSent.reset();
+        totalMessageSendErrors.reset();
         totalMessagesReceived.reset();
+        totalMessagesAcknowledged.reset();
+        totalAckErrors.reset();
+    }
+
+    public void reset() {
+        resetMeasurement();
+        inFlightSends.reset();
+        ackInFlight.reset();
+        acknowledgementTrackingSupported = false;
     }
 
     public void recordProducerFailure() {
-        inFlightSends.decrement();
-        messageSendErrors.increment();
-        messageSendErrorCounter.inc();
-        totalMessageSendErrors.increment();
+        try {
+            messageSendErrors.increment();
+            totalMessageSendErrors.increment();
+            messageSendErrorCounter.inc();
+        } finally {
+            inFlightSends.decrement();
+        }
     }
 
     public void recordProducerSuccess(
             long payloadLength, long intendedSendTimeNs, long sendTimeNs, long nowNs) {
-        inFlightSends.decrement();
-        messagesSent.increment();
-        totalMessagesSent.increment();
-        messagesSentCounter.inc();
-        bytesSent.add(payloadLength);
-        bytesSentCounter.add(payloadLength);
+        try {
+            messagesSent.increment();
+            totalMessagesSent.increment();
+            messagesSentCounter.inc();
+            bytesSent.add(payloadLength);
+            bytesSentCounter.add(payloadLength);
 
-        final long latencyMicros =
-                Math.min(highestTrackableValue, TimeUnit.NANOSECONDS.toMicros(nowNs - sendTimeNs));
-        publishLatencyRecorder.recordValue(latencyMicros);
-        cumulativePublishLatencyRecorder.recordValue(latencyMicros);
-        publishLatencyStats.registerSuccessfulEvent(latencyMicros, TimeUnit.MICROSECONDS);
+            final long latencyMicros =
+                    Math.min(highestTrackableValue, TimeUnit.NANOSECONDS.toMicros(nowNs - sendTimeNs));
+            publishLatencyRecorder.recordValue(latencyMicros);
+            cumulativePublishLatencyRecorder.recordValue(latencyMicros);
+            publishLatencyStats.registerSuccessfulEvent(latencyMicros, TimeUnit.MICROSECONDS);
 
-        final long sendDelayMicros =
-                Math.min(
-                        highestTrackableValue, TimeUnit.NANOSECONDS.toMicros(sendTimeNs - intendedSendTimeNs));
-        publishDelayLatencyRecorder.recordValue(sendDelayMicros);
-        cumulativePublishDelayLatencyRecorder.recordValue(sendDelayMicros);
-        publishDelayLatencyStats.registerSuccessfulEvent(sendDelayMicros, TimeUnit.MICROSECONDS);
+            final long sendDelayMicros =
+                    Math.min(
+                            highestTrackableValue,
+                            TimeUnit.NANOSECONDS.toMicros(sendTimeNs - intendedSendTimeNs));
+            publishDelayLatencyRecorder.recordValue(sendDelayMicros);
+            cumulativePublishDelayLatencyRecorder.recordValue(sendDelayMicros);
+            publishDelayLatencyStats.registerSuccessfulEvent(sendDelayMicros, TimeUnit.MICROSECONDS);
+        } finally {
+            inFlightSends.decrement();
+        }
     }
 
     public void recordProducerStarted() {
         inFlightSends.increment();
+    }
+
+    public void recordAcknowledgementStarted() {
+        acknowledgementTrackingSupported = true;
+        ackInFlight.increment();
+    }
+
+    public void recordAcknowledgementCompleted(Throwable error) {
+        try {
+            if (error == null) {
+                messagesAcknowledged.increment();
+                totalMessagesAcknowledged.increment();
+                messagesAcknowledgedCounter.inc();
+            } else {
+                ackErrors.increment();
+                totalAckErrors.increment();
+                ackErrorCounter.inc();
+            }
+        } finally {
+            ackInFlight.decrement();
+        }
     }
 }

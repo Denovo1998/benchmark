@@ -66,6 +66,24 @@ metadata-convergence window after an Oxia-backed partitioned topic is created;
 other setup errors still fail the run immediately, and the retry delay is
 outside the measured workload interval.
 
+Formal workloads set both `warmupDrainTimeoutSeconds` and
+`measurementDrainTimeoutSeconds`. The Pulsar listener tracks every
+`acknowledgeAsync` operation from listener entry through future completion. At
+the warm-up boundary the framework pauses producer loops and waits for producer
+in-flight, delivery backlog, and ACK in-flight to reach zero; acknowledged and
+received counts must match, and Pulsar admin must report zero subscription
+backlog in two consecutive polls one second apart. Only then does it reset
+counters and latency histograms, rebuild the rate limiter, and record
+`measurementStartedAt`.
+
+The same drain runs after producer pause at the end of measurement before
+cumulative latency is collected. A send or ACK error, redelivery count,
+unsupported ACK tracking, drain timeout, count mismatch, or broker backlog read
+failure marks a formal run `INVALID`; producers remain paused until worker
+shutdown. An invalid run must be archived and followed by a fresh OMB release
+and Pulsar cold reset, because a failed producer future can still correspond to
+an append whose asynchronous recovery later commits.
+
 For R1, keep the benchmark sample interval at one second, delete the selected
 owner broker with `inject-broker-crash.sh`, and pass the resulting event file to
 the analyzer. The injector records deletion and replacement-Ready timestamps;
@@ -84,10 +102,33 @@ B1 records both the OMB counter estimate and the Pulsar admin API's summed
 partition `msgBacklog` at the drain boundary. A formal Pulsar B1 run fails
 closed if broker backlog cannot be read.
 
-`run-c1-sweep.sh` renders the initial explicit C1 ladder (`50k` through `1M`
-msg/s by default) with one deterministic run ID per candidate. A candidate that
-fails the benchmark is retained as a `FAILED` manifest so the first failing rate
-is part of the sweep evidence rather than an ignored shell error.
+`run-c1-sweep.sh` runs exactly one explicit C1 candidate. This is intentional:
+the outer deployment workflow must cold-reset and reinstall Pulsar between
+candidates. Start with `5k, 10k, 15k, 20k, 25k, 30k, 40k, 50k` msg/s, then
+extend by 1.5x only after 50k passes. Analyze each result with optional latency
+limits:
+
+```bash
+scripts/nereus-benchmark/analyze-run.py \
+  results/<campaign>/<run>/result.json \
+  --max-publish-p50-ms 18.1 \
+  --max-publish-p99-ms 38 \
+  > results/<campaign>/<run>/analysis.json
+```
+
+After A and B each have at least three repetitions per candidate, select their
+highest common passing rate:
+
+```bash
+scripts/nereus-benchmark/select-common-rate.py \
+  results/<campaign>/*stage-{A,B}-*/analysis.json \
+  --stages A,B \
+  --min-repetitions 3 \
+  --require-latency-gate
+```
+
+The analyzer's data-plane decision still requires external CPU, network,
+broker, BookKeeper and disk evidence before a formal PASS.
 
 For instructions on running the OpenMessaging benchmarks for Pulsar, see the [official documentation](http://openmessaging.cloud/docs/benchmarks/pulsar/).
 

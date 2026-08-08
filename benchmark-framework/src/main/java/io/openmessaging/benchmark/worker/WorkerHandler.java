@@ -39,6 +39,8 @@ public class WorkerHandler {
     public static final String CREATE_PRODUCERS = "/create-producers";
     public static final String PROBE_PRODUCERS = "/probe-producers";
     public static final String CREATE_CONSUMERS = "/create-consumers";
+    public static final String PAUSE_PRODUCERS = "/pause-producers";
+    public static final String RESUME_PRODUCERS = "/resume-producers";
     public static final String PAUSE_CONSUMERS = "/pause-consumers";
     public static final String RESUME_CONSUMERS = "/resume-consumers";
     public static final String START_LOAD = "/start-load";
@@ -60,6 +62,8 @@ public class WorkerHandler {
         app.post(CREATE_PRODUCERS, this::handleCreateProducers);
         app.post(PROBE_PRODUCERS, this::handleProbeProducers);
         app.post(CREATE_CONSUMERS, this::handleCreateConsumers);
+        app.post(PAUSE_PRODUCERS, this::handlePauseProducers);
+        app.post(RESUME_PRODUCERS, this::handleResumeProducers);
         app.post(PAUSE_CONSUMERS, this::handlePauseConsumers);
         app.post(RESUME_CONSUMERS, this::handleResumeConsumers);
         app.post(START_LOAD, this::handleStartLoad);
@@ -117,6 +121,14 @@ public class WorkerHandler {
         log.info(
                 "Received create consumers request for topics: {}", consumerAssignment.topicsSubscriptions);
         localWorker.createConsumers(consumerAssignment);
+    }
+
+    private void handlePauseProducers(Context ctx) throws Exception {
+        localWorker.pauseProducers();
+    }
+
+    private void handleResumeProducers(Context ctx) throws Exception {
+        localWorker.resumeProducers();
     }
 
     private void handlePauseConsumers(Context ctx) throws Exception {

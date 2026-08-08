@@ -15,8 +15,9 @@
 
 set -euo pipefail
 
-if [[ $# -lt 5 ]]; then
-  echo "usage: $0 STAGE BLOCK_ID REPETITION SEED WORKERS_FILE [RATE ...]" >&2
+if [[ $# -ne 6 ]]; then
+  echo "usage: $0 STAGE BLOCK_ID REPETITION SEED WORKERS_FILE RATE" >&2
+  echo "formal C1 candidates require one cold Pulsar deployment per invocation" >&2
   exit 2
 fi
 
@@ -27,9 +28,6 @@ seed="$4"
 workers_file="$5"
 shift 5
 rates=("$@")
-if [[ ${#rates[@]} -eq 0 ]]; then
-  rates=(50000 75000 100000 150000 200000 300000 400000 600000 800000 1000000)
-fi
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$script_dir/../.." && pwd)"
@@ -37,7 +35,7 @@ campaign_id="${CAMPAIGN_ID:-v010-202607}"
 work_root="${NEREUS_C1_WORK_ROOT:-${repo_root}/results/${campaign_id}/c1-sweep-configs}"
 mkdir -p "$work_root"
 summary="$work_root/summary.jsonl"
-: > "$summary"
+touch "$summary"
 
 for rate in "${rates[@]}"; do
   [[ "$rate" =~ ^[1-9][0-9]*$ ]] || { echo "invalid rate: $rate" >&2; exit 2; }
@@ -69,6 +67,15 @@ PY
   fi
   printf '{"runId":"%s","rate":%s,"exitCode":%s,"resultDir":"%s"}\n' \
     "$run_id" "$rate" "$code" "$result_dir" >> "$summary"
+  if [[ $code -eq 0 && -r "$result_dir/result.json" ]]; then
+    analysis_args=("$result_dir/result.json")
+    if [[ -n "${NEREUS_MAX_PUBLISH_P50_MS:-}" ]]; then
+      analysis_args+=(--max-publish-p50-ms "$NEREUS_MAX_PUBLISH_P50_MS")
+    fi
+    if [[ -n "${NEREUS_MAX_PUBLISH_P99_MS:-}" ]]; then
+      analysis_args+=(--max-publish-p99-ms "$NEREUS_MAX_PUBLISH_P99_MS")
+    fi
+    python3 "$script_dir/analyze-run.py" "${analysis_args[@]}" > "$result_dir/analysis.json"
+  fi
+  exit "$code"
 done
-
-echo "C1 sweep completed; candidate status: $summary"

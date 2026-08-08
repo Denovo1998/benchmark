@@ -215,7 +215,6 @@ public class Benchmark {
                             manifest.runtimeInfo = worker.getDriverRuntimeInfo();
                             manifest.workerId =
                                     manifest.runtimeInfo == null ? null : manifest.runtimeInfo.namespace;
-                            manifest.measurementStartedAt = Instant.now().toString();
                             writeRunManifest(resultFile, manifest);
                         }
 
@@ -240,6 +239,42 @@ public class Benchmark {
                             manifest.payloadSeed = result.payloadSeed;
                             manifest.payloadSha256 = result.payloadSha256;
                             manifest.assignmentSha256 = result.assignmentSha256;
+                            manifest.measurementStartedAt = result.measurementStartedAt;
+                            manifest.measurementDurationSeconds = result.measurementDurationSeconds;
+                            manifest.warmupDrainApplied = result.warmupDrainApplied;
+                            manifest.warmupDrainDurationSeconds = result.warmupDrainDurationSeconds;
+                            manifest.warmupDrainMessagesSent = result.warmupDrainMessagesSent;
+                            manifest.warmupDrainMessagesReceived = result.warmupDrainMessagesReceived;
+                            manifest.warmupDrainMessageSendErrors = result.warmupDrainMessageSendErrors;
+                            manifest.warmupDrainInFlightSends = result.warmupDrainInFlightSends;
+                            manifest.warmupDrainMessagesAcknowledged = result.warmupDrainMessagesAcknowledged;
+                            manifest.warmupDrainAckErrors = result.warmupDrainAckErrors;
+                            manifest.warmupDrainAckInFlight = result.warmupDrainAckInFlight;
+                            manifest.warmupDrainAcknowledgementTrackingSupported =
+                                    result.warmupDrainAcknowledgementTrackingSupported;
+                            manifest.warmupDrainBacklogMessages = result.warmupDrainBacklogMessages;
+                            manifest.warmupDrainBrokerBacklogMessages = result.warmupDrainBrokerBacklogMessages;
+                            manifest.warmupDrainBrokerBacklogZeroPolls = result.warmupDrainBrokerBacklogZeroPolls;
+                            manifest.measurementEndedAt = result.measurementEndedAt;
+                            manifest.measurementCompletedAt = result.measurementCompletedAt;
+                            manifest.measurementDrainApplied = result.measurementDrainApplied;
+                            manifest.measurementDrainDurationSeconds = result.measurementDrainDurationSeconds;
+                            manifest.measurementDrainMessagesSent = result.measurementDrainMessagesSent;
+                            manifest.measurementDrainMessagesReceived = result.measurementDrainMessagesReceived;
+                            manifest.measurementDrainMessageSendErrors = result.measurementDrainMessageSendErrors;
+                            manifest.measurementDrainInFlightSends = result.measurementDrainInFlightSends;
+                            manifest.measurementDrainMessagesAcknowledged =
+                                    result.measurementDrainMessagesAcknowledged;
+                            manifest.measurementDrainAckErrors = result.measurementDrainAckErrors;
+                            manifest.measurementDrainAckInFlight = result.measurementDrainAckInFlight;
+                            manifest.measurementDrainAcknowledgementTrackingSupported =
+                                    result.measurementDrainAcknowledgementTrackingSupported;
+                            manifest.measurementDrainBacklogMessages = result.measurementDrainBacklogMessages;
+                            manifest.measurementDrainBrokerBacklogMessages =
+                                    result.measurementDrainBrokerBacklogMessages;
+                            manifest.measurementDrainBrokerBacklogZeroPolls =
+                                    result.measurementDrainBrokerBacklogZeroPolls;
+                            manifest.targetPublishRate = result.targetPublishRate;
                             manifest.requestedBacklogBytes = result.requestedBacklogBytes;
                             manifest.backlogAtDrainStartMessages = result.backlogAtDrainStartMessages;
                             manifest.backlogBuildDurationSeconds = result.backlogBuildDurationSeconds;
@@ -256,9 +291,12 @@ public class Benchmark {
                         log.error(
                                 "Failed to run the workload '{}' for driver '{}'", workload.name, driverConfig, e);
                         if (manifest != null) {
-                            manifest.status = "FAILED";
+                            manifest.status = isInvalidRun(e) ? "INVALID" : "FAILED";
                             manifest.completedAt = Instant.now().toString();
                             manifest.endedAt = manifest.completedAt;
+                            if (generator != null) {
+                                generator.copyBoundaryEvidenceTo(manifest);
+                            }
                             manifest.failureType = e.getClass().getName();
                             manifest.failureMessage = safeFailureMessage(e);
                             try {
@@ -287,6 +325,17 @@ public class Benchmark {
             throw new IllegalStateException(
                     "One or more benchmark runs failed; refusing a successful exit", failures.get(0));
         }
+    }
+
+    static boolean isInvalidRun(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof InvalidBenchmarkRunException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private static File defaultResultFile(

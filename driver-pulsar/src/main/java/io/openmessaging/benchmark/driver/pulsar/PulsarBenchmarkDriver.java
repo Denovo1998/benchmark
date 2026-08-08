@@ -52,6 +52,7 @@ import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.admin.PulsarAdminException.ConflictException;
 import org.apache.pulsar.client.api.ClientBuilder;
 import org.apache.pulsar.client.api.Consumer;
+import org.apache.pulsar.client.api.Message;
 import org.apache.pulsar.client.api.ProducerBuilder;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
@@ -322,15 +323,7 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                 .newConsumer(Schema.BYTEBUFFER)
                 .priorityLevel(0)
                 .subscriptionType(config.consumer.subscriptionType)
-                .messageListener(
-                        (c, msg) -> {
-                            try {
-                                consumerCallback.messageReceived(msg.getValue(), msg.getPublishTime());
-                                c.acknowledgeAsync(msg);
-                            } finally {
-                                msg.release();
-                            }
-                        })
+                .messageListener((c, msg) -> receiveAndAcknowledge(c, msg, consumerCallback))
                 .topic(topic)
                 .subscriptionName(subscriptionName)
                 .receiverQueueSize(config.consumer.receiverQueueSize)
@@ -366,6 +359,38 @@ public class PulsarBenchmarkDriver implements BenchmarkDriver {
                                                             topic, subscriptionName, consumerCallback, attempt + 1));
                         })
                 .thenCompose(Function.identity());
+    }
+
+    static void receiveAndAcknowledge(
+            Consumer<ByteBuffer> consumer,
+            Message<ByteBuffer> message,
+            ConsumerCallback consumerCallback) {
+        boolean acknowledgementTrackingStarted = false;
+        try {
+            consumerCallback.messageAcknowledgementStarted();
+            acknowledgementTrackingStarted = true;
+            consumerCallback.messageReceived(message.getValue(), message.getPublishTime());
+            CompletableFuture<Void> acknowledgement =
+                    Objects.requireNonNull(
+                            consumer.acknowledgeAsync(message), "Pulsar acknowledgeAsync returned null");
+            acknowledgement.whenComplete(
+                    (ignored, error) -> {
+                        consumerCallback.messageAcknowledgementCompleted(error);
+                        if (error != null) {
+                            log.warn("Failed to acknowledge benchmark message", error);
+                        }
+                    });
+        } catch (Throwable error) {
+            if (acknowledgementTrackingStarted) {
+                consumerCallback.messageAcknowledgementCompleted(error);
+            }
+            if (error instanceof Error) {
+                throw (Error) error;
+            }
+            log.warn("Failed to process or schedule acknowledgement for benchmark message", error);
+        } finally {
+            message.release();
+        }
     }
 
     private static CompletableFuture<Void> delayBeforeTopicRetry(long delayMillis) {

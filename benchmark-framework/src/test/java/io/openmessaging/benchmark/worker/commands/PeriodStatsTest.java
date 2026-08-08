@@ -30,6 +30,12 @@ class PeriodStatsTest {
         one.totalMessagesSent = 6;
         one.totalMessageSendErrors = 7;
         one.totalMessagesReceived = 8;
+        one.inFlightSends = 9;
+        one.messagesAcknowledged = 10;
+        one.ackErrors = 11;
+        one.ackInFlight = 12;
+        one.totalMessagesAcknowledged = 13;
+        one.totalAckErrors = 14;
         PeriodStats two = new PeriodStats();
         two.messagesSent = 10;
         two.messageSendErrors = 20;
@@ -39,6 +45,13 @@ class PeriodStatsTest {
         two.totalMessagesSent = 60;
         two.totalMessageSendErrors = 70;
         two.totalMessagesReceived = 80;
+        two.inFlightSends = 90;
+        two.messagesAcknowledged = 100;
+        two.ackErrors = 110;
+        two.ackInFlight = 120;
+        two.totalMessagesAcknowledged = 130;
+        two.totalAckErrors = 140;
+        two.acknowledgementTrackingSupported = true;
         PeriodStats result = one.plus(two);
         assertThat(result)
                 .satisfies(
@@ -51,6 +64,13 @@ class PeriodStatsTest {
                             assertThat(r.totalMessagesSent).isEqualTo(66);
                             assertThat(r.totalMessageSendErrors).isEqualTo(77);
                             assertThat(r.totalMessagesReceived).isEqualTo(88);
+                            assertThat(r.inFlightSends).isEqualTo(99);
+                            assertThat(r.messagesAcknowledged).isEqualTo(110);
+                            assertThat(r.ackErrors).isEqualTo(121);
+                            assertThat(r.ackInFlight).isEqualTo(132);
+                            assertThat(r.totalMessagesAcknowledged).isEqualTo(143);
+                            assertThat(r.totalAckErrors).isEqualTo(154);
+                            assertThat(r.acknowledgementTrackingSupported).isTrue();
 
                             two.publishLatency.add(one.publishLatency);
                             two.publishDelayLatency.add(one.publishDelayLatency);
@@ -74,6 +94,12 @@ class PeriodStatsTest {
         two.totalMessagesSent = 60;
         two.totalMessageSendErrors = 70;
         two.totalMessagesReceived = 80;
+        two.messagesAcknowledged = 40;
+        two.ackErrors = 2;
+        two.ackInFlight = 3;
+        two.totalMessagesAcknowledged = 50;
+        two.totalAckErrors = 4;
+        two.acknowledgementTrackingSupported = true;
         PeriodStats result = one.plus(two);
         assertThat(result)
                 .satisfies(
@@ -86,6 +112,12 @@ class PeriodStatsTest {
                             assertThat(r.totalMessagesSent).isEqualTo(60);
                             assertThat(r.totalMessageSendErrors).isEqualTo(70);
                             assertThat(r.totalMessagesReceived).isEqualTo(80);
+                            assertThat(r.messagesAcknowledged).isEqualTo(40);
+                            assertThat(r.ackErrors).isEqualTo(2);
+                            assertThat(r.ackInFlight).isEqualTo(3);
+                            assertThat(r.totalMessagesAcknowledged).isEqualTo(50);
+                            assertThat(r.totalAckErrors).isEqualTo(4);
+                            assertThat(r.acknowledgementTrackingSupported).isTrue();
 
                             assertThat(r.publishLatency).isEqualTo(two.publishLatency);
                             assertThat(r.publishDelayLatency).isEqualTo(two.publishDelayLatency);

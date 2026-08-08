@@ -52,10 +52,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.IntStream;
 import org.apache.bookkeeper.stats.NullStatsLogger;
 import org.apache.bookkeeper.stats.StatsLogger;
@@ -68,10 +72,13 @@ public class LocalWorker implements Worker, ConsumerCallback {
     private final List<BenchmarkProducer> producers = new ArrayList<>();
     private final List<BenchmarkConsumer> consumers = new ArrayList<>();
     private volatile MessageProducer messageProducer;
+    private volatile double currentPublishRate = 1.0;
+    private volatile ProducerGate producerGate = new ProducerGate(0);
     private final ExecutorService executor =
             Executors.newCachedThreadPool(new DefaultThreadFactory("local-worker"));
-    private final WorkerStats stats;
-    private boolean testCompleted = false;
+    private final StatsLogger statsLogger;
+    private volatile WorkerStats stats;
+    private final AtomicLong loadGeneration = new AtomicLong();
     private Long topicNameSeed;
 
     public LocalWorker() {
@@ -79,6 +86,7 @@ public class LocalWorker implements Worker, ConsumerCallback {
     }
 
     public LocalWorker(StatsLogger statsLogger) {
+        this.statsLogger = statsLogger;
         stats = new WorkerStats(statsLogger);
         updateMessageProducer(1.0);
     }
@@ -86,7 +94,10 @@ public class LocalWorker implements Worker, ConsumerCallback {
     @Override
     public void initializeDriver(File driverConfigFile) throws IOException {
         Preconditions.checkArgument(benchmarkDriver == null);
-        testCompleted = false;
+        loadGeneration.incrementAndGet();
+        stats = new WorkerStats(statsLogger);
+        currentPublishRate = 1.0;
+        updateMessageProducer(currentPublishRate);
 
         DriverConfiguration driverConfiguration =
                 mapper.readValue(driverConfigFile, DriverConfiguration.class);
@@ -182,23 +193,20 @@ public class LocalWorker implements Worker, ConsumerCallback {
     public void createConsumers(ConsumerAssignment consumerAssignment) {
         Timer timer = new Timer();
         AtomicInteger index = new AtomicInteger();
+        ConsumerCallback callback = new StatsConsumerCallback(stats);
 
-        consumers.addAll(
-                benchmarkDriver
-                        .createConsumers(
-                                consumerAssignment.topicsSubscriptions.stream()
-                                        .map(
-                                                c ->
-                                                        new ConsumerInfo(
-                                                                index.getAndIncrement(), c.topic, c.subscription, this))
-                                        .collect(toList()))
-                        .join());
+        List<ConsumerInfo> consumerInfos =
+                consumerAssignment.topicsSubscriptions.stream()
+                        .map(c -> new ConsumerInfo(index.getAndIncrement(), c.topic, c.subscription, callback))
+                        .collect(toList());
+        consumers.addAll(benchmarkDriver.createConsumers(consumerInfos).join());
 
         log.info("Created {} consumers in {} ms", consumers.size(), timer.elapsedMillis());
     }
 
     @Override
     public void startLoad(ProducerWorkAssignment producerWorkAssignment) {
+        long generation = loadGeneration.incrementAndGet();
         int processors = Runtime.getRuntime().availableProcessors();
         List<byte[]> payloads = resolvePayloads(producerWorkAssignment);
 
@@ -215,6 +223,9 @@ public class LocalWorker implements Worker, ConsumerCallback {
             processorIdx = (processorIdx + 1) % processors;
         }
 
+        ProducerGate gate = new ProducerGate(processorAssignment.size());
+        producerGate = gate;
+
         int executorOrdinal = 0;
         for (List<BenchmarkProducer> assignedProducers : processorAssignment.values()) {
             submitProducersToExecutor(
@@ -222,7 +233,9 @@ public class LocalWorker implements Worker, ConsumerCallback {
                     producerWorkAssignment.keyDistributorType,
                     payloads,
                     producerWorkAssignment.payloadSelectionSeed,
-                    executorOrdinal++);
+                    executorOrdinal++,
+                    gate,
+                    generation);
         }
     }
 
@@ -241,9 +254,40 @@ public class LocalWorker implements Worker, ConsumerCallback {
 
     @Override
     public void probeProducers() throws IOException {
-        producers.forEach(
-                producer ->
-                        producer.sendAsync(Optional.of("key"), new byte[10]).thenRun(stats::recordMessageSent));
+        List<CompletableFuture<Void>> probes = new ArrayList<>(producers.size());
+        for (BenchmarkProducer producer : producers) {
+            stats.recordProducerStarted();
+            CompletableFuture<Void> probe;
+            try {
+                probe = producer.sendAsync(Optional.of("key"), new byte[10]);
+            } catch (Throwable error) {
+                probe = new CompletableFuture<>();
+                probe.completeExceptionally(error);
+            }
+            probes.add(
+                    probe.whenComplete(
+                            (ignored, error) -> {
+                                if (error == null) {
+                                    stats.recordProbeSuccess();
+                                } else {
+                                    stats.recordProducerFailure();
+                                }
+                            }));
+        }
+
+        try {
+            CompletableFuture.allOf(probes.toArray(new CompletableFuture<?>[0])).join();
+        } catch (CompletionException error) {
+            throw new IOException("readiness probe send failed", unwrapCompletionException(error));
+        }
+    }
+
+    private static Throwable unwrapCompletionException(Throwable error) {
+        Throwable current = error;
+        while (current instanceof CompletionException && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private void submitProducersToExecutor(
@@ -251,7 +295,9 @@ public class LocalWorker implements Worker, ConsumerCallback {
             io.openmessaging.benchmark.utils.distributor.KeyDistributorType keyDistributorType,
             List<byte[]> payloads,
             long payloadSelectionSeed,
-            int executorOrdinal) {
+            int executorOrdinal,
+            ProducerGate gate,
+            long generation) {
         java.util.Random r =
                 new java.util.Random(
                         SeedDerivation.derive(
@@ -264,13 +310,22 @@ public class LocalWorker implements Worker, ConsumerCallback {
         executor.submit(
                 () -> {
                     try {
-                        while (!testCompleted) {
-                            producers.forEach(
-                                    p ->
-                                            messageProducer.sendMessage(
-                                                    p,
-                                                    Optional.ofNullable(keyDistributor.next()),
-                                                    payloads.get(r.nextInt(payloadCount))));
+                        while (loadGeneration.get() == generation) {
+                            for (BenchmarkProducer producer : producers) {
+                                gate.enter();
+                                try {
+                                    if (loadGeneration.get() != generation) {
+                                        return;
+                                    }
+                                    messageProducer.sendMessage(
+                                            producer,
+                                            Optional.ofNullable(keyDistributor.next()),
+                                            payloads.get(r.nextInt(payloadCount)),
+                                            () -> loadGeneration.get() != generation);
+                                } finally {
+                                    gate.exit();
+                                }
+                            }
                         }
                     } catch (Throwable t) {
                         log.error("Got error", t);
@@ -287,7 +342,21 @@ public class LocalWorker implements Worker, ConsumerCallback {
         updateMessageProducer(publishRate);
     }
 
+    @Override
+    public void pauseProducers() {
+        producerGate.pause();
+        log.info("Paused producers");
+    }
+
+    @Override
+    public void resumeProducers() {
+        updateMessageProducer(currentPublishRate);
+        producerGate.resume();
+        log.info("Resumed producers at {} msg/s", currentPublishRate);
+    }
+
     private void updateMessageProducer(double publishRate) {
+        currentPublishRate = publishRate;
         messageProducer = new MessageProducer(new UniformRateLimiter(publishRate), stats);
     }
 
@@ -316,7 +385,21 @@ public class LocalWorker implements Worker, ConsumerCallback {
         internalMessageReceived(data.remaining(), publishTimestamp);
     }
 
+    @Override
+    public void messageAcknowledgementStarted() {
+        stats.recordAcknowledgementStarted();
+    }
+
+    @Override
+    public void messageAcknowledgementCompleted(Throwable error) {
+        stats.recordAcknowledgementCompleted(error);
+    }
+
     public void internalMessageReceived(int size, long publishTimestamp) {
+        recordMessageReceived(stats, size, publishTimestamp);
+    }
+
+    private static void recordMessageReceived(WorkerStats stats, int size, long publishTimestamp) {
         long now = System.currentTimeMillis();
         long endToEndLatencyMicros = TimeUnit.MILLISECONDS.toMicros(now - publishTimestamp);
         stats.recordMessageReceived(size, endToEndLatencyMicros);
@@ -340,17 +423,15 @@ public class LocalWorker implements Worker, ConsumerCallback {
 
     @Override
     public void resetStats() throws IOException {
-        stats.resetLatencies();
+        stats.resetMeasurement();
     }
 
     @Override
     public void stopAll() {
-        testCompleted = true;
-        stats.reset();
+        loadGeneration.incrementAndGet();
+        producerGate.resume();
 
         try {
-            Thread.sleep(100);
-
             for (BenchmarkProducer producer : producers) {
                 producer.close();
             }
@@ -367,6 +448,9 @@ public class LocalWorker implements Worker, ConsumerCallback {
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
+        } finally {
+            stats.reset();
+            producerGate = new ProducerGate(0);
         }
     }
 
@@ -381,6 +465,69 @@ public class LocalWorker implements Worker, ConsumerCallback {
     }
 
     private static final ObjectWriter writer = new ObjectMapper().writerWithDefaultPrettyPrinter();
+
+    private static final class ProducerGate {
+        private final Semaphore permits;
+        private final int permitCount;
+        private boolean paused;
+
+        private ProducerGate(int permitCount) {
+            this.permitCount = permitCount;
+            permits = new Semaphore(permitCount, true);
+        }
+
+        private void enter() {
+            permits.acquireUninterruptibly();
+        }
+
+        private void exit() {
+            permits.release();
+        }
+
+        private synchronized void pause() {
+            if (paused) {
+                return;
+            }
+            permits.acquireUninterruptibly(permitCount);
+            paused = true;
+        }
+
+        private synchronized void resume() {
+            if (!paused) {
+                return;
+            }
+            paused = false;
+            permits.release(permitCount);
+        }
+    }
+
+    private static final class StatsConsumerCallback implements ConsumerCallback {
+        private final WorkerStats stats;
+
+        private StatsConsumerCallback(WorkerStats stats) {
+            this.stats = stats;
+        }
+
+        @Override
+        public void messageReceived(byte[] data, long publishTimestamp) {
+            recordMessageReceived(stats, data.length, publishTimestamp);
+        }
+
+        @Override
+        public void messageReceived(ByteBuffer data, long publishTimestamp) {
+            recordMessageReceived(stats, data.remaining(), publishTimestamp);
+        }
+
+        @Override
+        public void messageAcknowledgementStarted() {
+            stats.recordAcknowledgementStarted();
+        }
+
+        @Override
+        public void messageAcknowledgementCompleted(Throwable error) {
+            stats.recordAcknowledgementCompleted(error);
+        }
+    }
 
     private static final ObjectMapper mapper =
             new ObjectMapper(new YAMLFactory())

@@ -25,10 +25,19 @@ class CountersStatsTest {
         one.messagesSent = 1;
         one.messageSendErrors = 10;
         one.messagesReceived = 100;
+        one.inFlightSends = 1000;
+        one.messagesAcknowledged = 90;
+        one.ackErrors = 3;
+        one.ackInFlight = 7;
         CountersStats two = new CountersStats();
         two.messagesSent = 2;
         two.messageSendErrors = 20;
         two.messagesReceived = 200;
+        two.inFlightSends = 2000;
+        two.messagesAcknowledged = 180;
+        two.ackErrors = 4;
+        two.ackInFlight = 16;
+        two.acknowledgementTrackingSupported = true;
 
         CountersStats result = one.plus(two);
         assertThat(result)
@@ -37,6 +46,11 @@ class CountersStatsTest {
                             assertThat(r.messagesSent).isEqualTo(3);
                             assertThat(r.messageSendErrors).isEqualTo(30);
                             assertThat(r.messagesReceived).isEqualTo(300);
+                            assertThat(r.inFlightSends).isEqualTo(3000);
+                            assertThat(r.messagesAcknowledged).isEqualTo(270);
+                            assertThat(r.ackErrors).isEqualTo(7);
+                            assertThat(r.ackInFlight).isEqualTo(23);
+                            assertThat(r.acknowledgementTrackingSupported).isTrue();
                         });
     }
 
@@ -47,6 +61,9 @@ class CountersStatsTest {
         two.messagesSent = 2;
         two.messageSendErrors = 20;
         two.messagesReceived = 200;
+        two.messagesAcknowledged = 190;
+        two.ackInFlight = 10;
+        two.acknowledgementTrackingSupported = true;
 
         CountersStats result = zero.plus(two);
         assertThat(result)
@@ -55,6 +72,9 @@ class CountersStatsTest {
                             assertThat(r.messagesSent).isEqualTo(2);
                             assertThat(r.messageSendErrors).isEqualTo(20);
                             assertThat(r.messagesReceived).isEqualTo(200);
+                            assertThat(r.messagesAcknowledged).isEqualTo(190);
+                            assertThat(r.ackInFlight).isEqualTo(10);
+                            assertThat(r.acknowledgementTrackingSupported).isTrue();
                         });
     }
 }

@@ -18,6 +18,7 @@ import static io.openmessaging.benchmark.utils.UniformRateLimiter.uninterruptibl
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.utils.UniformRateLimiter;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,15 +40,29 @@ public class MessageProducer {
     }
 
     public void sendMessage(BenchmarkProducer producer, Optional<String> key, byte[] payload) {
+        sendMessage(producer, key, payload, () -> false);
+    }
+
+    void sendMessage(
+            BenchmarkProducer producer, Optional<String> key, byte[] payload, BooleanSupplier cancelled) {
         final long intendedSendTime = rateLimiter.acquire();
         uninterruptibleSleepNs(intendedSendTime);
+        if (cancelled.getAsBoolean()) {
+            return;
+        }
         final long sendTime = nanoClock.get();
         stats.recordProducerStarted();
         try {
             producer
                     .sendAsync(key, payload)
-                    .thenRun(() -> success(payload.length, intendedSendTime, sendTime))
-                    .exceptionally(this::failure);
+                    .whenComplete(
+                            (ignored, error) -> {
+                                if (error == null) {
+                                    success(payload.length, intendedSendTime, sendTime);
+                                } else {
+                                    failure(error);
+                                }
+                            });
         } catch (Throwable t) {
             failure(t);
         }
@@ -58,10 +73,9 @@ public class MessageProducer {
         stats.recordProducerSuccess(payloadLength, intendedSendTime, sendTime, nowNs);
     }
 
-    private Void failure(Throwable t) {
+    private void failure(Throwable t) {
         stats.recordProducerFailure();
         log.warn("Write error on message", t);
-        return null;
     }
 
     private static final Logger log = LoggerFactory.getLogger(MessageProducer.class);

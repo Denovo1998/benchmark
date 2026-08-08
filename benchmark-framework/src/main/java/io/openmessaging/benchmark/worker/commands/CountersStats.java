@@ -18,6 +18,10 @@ public class CountersStats {
     public long messagesReceived;
     public long messageSendErrors;
     public long inFlightSends;
+    public long messagesAcknowledged;
+    public long ackErrors;
+    public long ackInFlight;
+    public boolean acknowledgementTrackingSupported;
 
     public CountersStats plus(CountersStats toAdd) {
         CountersStats result = new CountersStats();
@@ -25,11 +29,19 @@ public class CountersStats {
         result.messagesReceived += this.messagesReceived;
         result.messageSendErrors += this.messageSendErrors;
         result.inFlightSends += this.inFlightSends;
+        result.messagesAcknowledged += this.messagesAcknowledged;
+        result.ackErrors += this.ackErrors;
+        result.ackInFlight += this.ackInFlight;
+        result.acknowledgementTrackingSupported |= this.acknowledgementTrackingSupported;
 
         result.messagesSent += toAdd.messagesSent;
         result.messagesReceived += toAdd.messagesReceived;
         result.messageSendErrors += toAdd.messageSendErrors;
         result.inFlightSends += toAdd.inFlightSends;
+        result.messagesAcknowledged += toAdd.messagesAcknowledged;
+        result.ackErrors += toAdd.ackErrors;
+        result.ackInFlight += toAdd.ackInFlight;
+        result.acknowledgementTrackingSupported |= toAdd.acknowledgementTrackingSupported;
         return result;
     }
 }

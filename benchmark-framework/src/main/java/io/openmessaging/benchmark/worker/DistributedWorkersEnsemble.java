@@ -248,6 +248,32 @@ public class DistributedWorkersEnsemble implements Worker {
     }
 
     @Override
+    public void pauseProducers() throws IOException {
+        producerWorkers.parallelStream()
+                .forEach(
+                        worker -> {
+                            try {
+                                worker.pauseProducers();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+    }
+
+    @Override
+    public void resumeProducers() throws IOException {
+        producerWorkers.parallelStream()
+                .forEach(
+                        worker -> {
+                            try {
+                                worker.resumeProducers();
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+    }
+
+    @Override
     public void stopAll() {
         workers.parallelStream().forEach(Worker::stopAll);
     }

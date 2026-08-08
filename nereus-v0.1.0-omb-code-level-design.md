@@ -72,8 +72,19 @@ ManagedLedger storage class。
 10. 一次正式 run 对应一次全新的 Pulsar Helm install。run 结束后归档证据并执行
     cold reset；不得让上一 run 的 Oxia、BookKeeper 或 SeaweedFS 数据进入下一 run。
 11. OMB 镜像也必须由 Git SHA 和 OCI digest 固化。A–E 使用相同 OMB 镜像、
-    worker 数量、资源和 placement。
+    worker 数量、资源和 placement，但每个正式 run 都重新安装 OMB release，确保
+    worker JVM、producer/consumer 和本地计数状态不跨 run 复用。
 12. 所有配置或运行时断言失败都必须让 `bin/benchmark` 非零退出，并保留失败 manifest。
+13. readiness probe、warm-up 和 measurement 的每个 send 都必须进入
+    in-flight/error 统计；结果计数先写入，再减少 in-flight。正式 run 在 warm-up 后
+    暂停 producer，等待 pending send、worker delivery backlog、ACK in-flight 归零，
+    并要求 acknowledged count 等于 received count、Pulsar subscription backlog 以至少
+    1 秒间隔连续两次为 0，再清空计数器/直方图并重建 rate limiter。
+14. measurement 到时先暂停 producer，再执行相同的 send/ACK/broker final drain，完成后
+    才读取累计 latency。send/ACK error、redelivery、ACK count mismatch、ACK tracking
+    不可用、broker backlog 读取失败或 drain 超时都将 run 标为 `INVALID`，且 producer
+    保持暂停。无效 run 归档后必须重建 OMB release 并 cold reset Pulsar；不能把
+    `MAY_HAVE_COMMITTED` 的晚提交带进下一 run。
 
 ---
 
@@ -291,6 +302,8 @@ producersPerTopic: 4
 producerRate: 100000
 consumerBacklogSizeGB: 0
 warmupDurationMinutes: 5
+warmupDrainTimeoutSeconds: 300
+measurementDrainTimeoutSeconds: 300
 testDurationMinutes: 15
 statsIntervalSeconds: 10
 ```
@@ -827,6 +840,11 @@ results/<campaignId>/<runId>/
 - manifest schema version；
 - campaignId、blockId、runId、stage、repetition、seed；
 - startedAt、measurementStartedAt、endedAt；
+- warm-up 和 measurement drain 是否执行、耗时、sent/received/acknowledged、send/ACK
+  errors、send/ACK final in-flight、ACK tracking capability、worker backlog、broker
+  subscription backlog 和连续 zero poll 次数；
+- measurementStartedAt、measurementEndedAt、measurementCompletedAt，以及由 monotonic clock
+  计算的 measurementDurationSeconds；
 - OMB Git SHA、image name、OCI target digest、runtime config ID；
 - Kubernetes context、Kubernetes namespace、Pulsar Helm release 和 cluster name；
 - `pulsar-helm-chart` deployment `run.env` 路径及其 SHA-256；
@@ -840,7 +858,7 @@ results/<campaignId>/<runId>/
 - compression、batching、subscription；
 - payload spec 和 payload pool SHA-256；
 - topic/subscription/producer assignment SHA-256；
-- status：`PREPARED`、`RUNNING`、`SUCCEEDED` 或 `FAILED`；
+- status：`PREPARED`、`RUNNING`、`SUCCEEDED`、`INVALID` 或 `FAILED`；
 - 失败类型和 message，但不记录 Secret。
 
 manifest 在开始负载前先以 `PREPARED` 原子写入；每次状态更新写临时文件后 rename。
@@ -857,6 +875,9 @@ public double consumeRate;
 public double consumeThroughputMiB;
 public long backlogMessages;
 public long inFlightSends;
+public long messagesAcknowledged;
+public long ackErrors;
+public long ackInFlight;
 // publish/end-to-end latency percentiles
 ```
 
@@ -865,7 +886,8 @@ public long inFlightSends;
 
 `Benchmark.main` 不再吞掉单次运行异常：
 
-- 任意 driver/workload 失败，记录失败 manifest；
+- warm-up 边界或 readiness 门禁失败，记录 `INVALID` manifest；
+- 其他 driver/workload 失败，记录 `FAILED` manifest；
 - 停止所有 worker；
 - 关闭 worker；
 - 最终非零退出；
@@ -873,7 +895,11 @@ public long inFlightSends;
 - campaign wrapper 同时断言 result 和 manifest 存在且 checksum 正确。
 
 `MessageProducer` 在调用 `sendAsync` 前增加 in-flight counter，并在成功或失败
-completion 中减少；`WorkerStats`、`PeriodStats` 和 `CountersStats` 暴露该值。
+completion 中先记录 result counter、最后减少 in-flight；`WorkerStats.toCountersStats`
+在 result counters 两侧读取 in-flight，避免 reset 边界观察到“旧 result + 新 zero”。
+Pulsar listener 在进入 callback 时增加 `ackInFlight`，并在 `acknowledgeAsync` future
+完成后先记录 acknowledged/error、最后减少 `ackInFlight`。这些值由
+`WorkerStats`、`PeriodStats` 和 `CountersStats` 暴露。
 C1 的“publish queue 未持续增长”门禁使用 measurement 后半段
 `inFlightSends` 斜率判断，而不是依赖不可见的客户端内部状态。
 
@@ -910,7 +936,8 @@ postDrainBacklogMessages
 实际 BookKeeper/object-store physical bytes 由集群指标单独记录，不能混为同一口径。
 
 Pulsar driver 在 drain 转换点通过 topic stats 读取 subscription `msgBacklog`，
-并把 broker actual backlog 与 OMB counter estimate 一起写入 manifest。
+并把 broker actual backlog、连续 zero poll 次数与 OMB counter estimate 一起写入
+manifest。只有至少间隔 1 秒的两个连续 zero poll 才允许开始 measurement。
 
 ## 7.15 Recovery event
 
@@ -996,6 +1023,7 @@ scripts/nereus-benchmark/run-case.sh
 scripts/nereus-benchmark/run-c1-sweep.sh
 scripts/nereus-benchmark/inject-broker-crash.sh
 scripts/nereus-benchmark/analyze-run.py
+scripts/nereus-benchmark/select-common-rate.py
 scripts/nereus-benchmark/build-omb-image.sh
 scripts/nereus-benchmark/containerd-transfer-omb-image.sh
 ```
@@ -1017,6 +1045,8 @@ useRandomizedPayloads: true
 randomBytesRatio: 1.0
 randomizedPayloadPoolSize: 4096
 warmupDurationMinutes: 5
+warmupDrainTimeoutSeconds: 300
+measurementDrainTimeoutSeconds: 300
 ```
 
 Pulsar consumer 固定 `Shared`。
@@ -1026,7 +1056,7 @@ Pulsar consumer。正式报告和 worker 容量检查必须使用这个 physical
 
 | Suite |          目的           |                        关键参数                         |            主结果             |
 |-------|-----------------------|-----------------------------------------------------|----------------------------|
-| S1    | 部署 smoke              | 1 topic × 16 partitions，1p/1c，1 KiB，50k msg/s，5 min | 能否稳定收发、policy gate         |
+| S1    | 部署 smoke              | 1 topic × 16 partitions，1p/1c，1 KiB，10k msg/s，5 min | 能否稳定收发、policy gate         |
 | C1    | 最大可持续吞吐               | 48 partitions，4p/4c，显式 rate sweep                   | stage sustainable rate     |
 | L1    | 固定负载延迟                | common ceiling 的 25%/50%/75%                        | publish/e2e p50–p99.99     |
 | B1    | backlog/read          | 50 GiB logical backlog 后 drain                      | build time、drain time/rate |
@@ -1035,8 +1065,9 @@ Pulsar consumer。正式报告和 worker 容量检查必须使用这个 physical
 
 ## 9.1 S1
 
-S1 保留现有 `1 topic × 16 partitions × 1 producer × 1 consumer × 1 KiB ×
-50,000 msg/s` 形态，但修改为确定性随机 payload，并缩短为 5 分钟。
+S1 使用 `1 topic × 16 partitions × 1 producer × 1 consumer × 1 KiB ×
+10,000 msg/s`，采用确定性随机 payload、2 分钟 warm-up 和 5 分钟 measurement。
+`10,000 msg/s` 只是保守的连接与 policy smoke 点，不代表服务器吞吐上限。
 
 S1 只回答：
 
@@ -1052,28 +1083,31 @@ S1 不进入正式吞吐结论。
 不使用当前 `producerRate: 0` 的在线自适应控制器。每个 candidate rate 是一个独立
 cold run。
 
-初始 rate ladder：
+当前硬件的初始 rate ladder 从低负载开始，避免第一个点就进入过载：
 
 ```text
-50k, 75k, 100k, 150k, 200k, 300k, 400k, 600k, 800k, 1M msg/s
+5k, 10k, 15k, 20k, 25k, 30k, 40k, 50k msg/s
 ```
 
-如果 50k 首个 candidate 就失败，按 25k、12.5k 继续向下寻找通过点；如果 1M
-仍通过，按 1.5 倍继续扩展，直到得到第一个失败点。
+如果 5k 首个 candidate 就失败，先停止 campaign 并诊断部署；如果 50k 仍通过，
+按 1.5 倍继续扩展，直到得到第一个失败点。
 
 找到第一个失败点后，在最后一个通过点与第一个失败点之间二分，直到候选差距不超过
 较低点的 5%。边界 candidate 至少重复 3 次。
 
 一个 candidate 被认定为 sustainable，必须同时满足：
 
-1. measurement 平均 achieved publish rate 不低于 target 的 98%；
-2. 平均 consume rate 不低于 achieved publish rate 的 99%；
-3. publish error / attempted publish 小于 `1e-6`；
-4. measurement 后半段 backlog 线性回归斜率不超过 target 的 0.1%；
-5. 结束 backlog 不超过 5 秒 target 消息量；
-6. OMB producer/consumer worker CPU 均未持续超过 90%；
-7. OMB client network 未持续超过可用带宽的 85%；
-8. OMB pending publish queue 未持续增长。
+1. warm-up 和 measurement final drain evidence 都显示 send/ACK errors、send/ACK
+   in-flight、worker backlog 为 0，ACK tracking 可用、acknowledged 等于 received，
+   broker subscription backlog 连续至少两次为 0；
+2. measurement 平均 achieved publish rate 不低于 target 的 98%；
+3. 平均 consume rate 不低于 achieved publish rate 的 99%；
+4. publish error / attempted publish 小于 `1e-6`，且 sample 中没有 ACK error；
+5. measurement 后半段 backlog 线性回归斜率不超过 target 的 0.1%；
+6. 结束 backlog 不超过 5 秒 target 消息量；
+7. OMB pending publish queue 未持续增长；
+8. OMB producer/consumer worker CPU 均未持续超过 90%；
+9. OMB client network 未持续超过可用带宽的 85%。
 
 每个 Stage 得到自己的 C1 ceiling。定义：
 
@@ -1083,6 +1117,31 @@ commonSustainableCeiling = min(A, B, C, D, E)
 
 L1 和 R1 只使用这个共同上限，不能使用各 Stage 自己的上限，否则延迟和恢复结果不是
 同负载对比。
+
+当前优先校准 A/B 时，先计算 `commonABSustainableRate = min(A, B)`。A/B 必须在
+相同 offered rate 下分别至少重复 3 次；固定按 A→B 跑一次不能作为通过证据。
+`run-c1-sweep.sh` 每次只接受一个 rate，外层部署流程必须在每个 candidate 之间执行
+cold reset。
+
+## 9.2.1 与外部报告的延迟对齐
+
+arXiv 2603.29113v1 的 `1.5M msg/s / publish P50 3.88 ms / P99 6.5 ms` 使用 3 台
+bare-metal、6 broker、6 bookie、128 partitions、10 GbE、专用 NVMe journal，且
+BookKeeper quorum 为 `E=3/Qw=2/Qa=2`。本 campaign 当前使用 `3/3/2`，因此不能把
+论文数字直接设为无条件 PASS 门槛。
+
+校准采用两档延迟目标：
+
+- 可比硬件 stretch：journal fdatasync P50 接近 `0.02 ms` 时，publish P50 ≤ 4 ms、
+  P99 ≤ 8 ms；
+- 诊断 envelope：publish P50 ≤ 18.1 ms、P99 ≤ 38 ms。超出后不再继续升速，先检查
+  BookKeeper add/journal latency、ledger flush、GC、网络和 backlog slope。
+
+本机一次 `fsync=1`、QD1 测试得到 sync P50 约 `0.014 ms`、P99 约 `0.051 ms`，说明
+journal 介质的空载 flush 下限足够低；但正式证据仍必须在每个 bookie journal 上以
+`fdatasync=1` 复测，并保留 workload 同期的 BookKeeper 指标。64 KiB、QD64 fio 时延
+主要反映饱和排队，不能替代 fdatasync 门禁。ledger 盘的 flush/writeback 也必须同步
+观察，因为它可能通过内核块层拖慢独立 journal。
 
 ## 9.3 L1
 

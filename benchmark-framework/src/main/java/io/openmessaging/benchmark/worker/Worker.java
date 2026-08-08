@@ -53,6 +53,10 @@ public interface Worker extends AutoCloseable {
 
     void adjustPublishRate(double publishRate) throws IOException;
 
+    void pauseProducers() throws IOException;
+
+    void resumeProducers() throws IOException;
+
     void pauseConsumers() throws IOException;
 
     void resumeConsumers() throws IOException;

@@ -52,6 +52,9 @@ import org.slf4j.LoggerFactory;
 
 public class WorkloadGenerator implements AutoCloseable {
 
+    private static final int REQUIRED_BROKER_BACKLOG_ZERO_POLLS = 2;
+    private static final long BROKER_BACKLOG_POLL_INTERVAL_MILLIS = 1_000;
+
     private final String driverName;
     private final RunConfiguration run;
     private final Workload workload;
@@ -76,6 +79,39 @@ public class WorkloadGenerator implements AutoCloseable {
     private volatile Long brokerBacklogAtDrainStartMessages;
     private volatile Long brokerBacklogAfterDrainMessages;
     private volatile String backlogPhase = "NOT_APPLICABLE";
+
+    private volatile String measurementStartedAt;
+    private volatile long measurementStartedAtNanos;
+    private volatile double measurementDurationSeconds;
+    private volatile boolean warmupDrainApplied;
+    private volatile double warmupDrainDurationSeconds;
+    private volatile long warmupDrainMessagesSent;
+    private volatile long warmupDrainMessagesReceived;
+    private volatile long warmupDrainMessageSendErrors;
+    private volatile long warmupDrainInFlightSends;
+    private volatile long warmupDrainMessagesAcknowledged;
+    private volatile long warmupDrainAckErrors;
+    private volatile long warmupDrainAckInFlight;
+    private volatile boolean warmupDrainAcknowledgementTrackingSupported;
+    private volatile long warmupDrainBacklogMessages;
+    private volatile Long warmupDrainBrokerBacklogMessages;
+    private volatile int warmupDrainBrokerBacklogZeroPolls;
+
+    private volatile String measurementEndedAt;
+    private volatile String measurementCompletedAt;
+    private volatile boolean measurementDrainApplied;
+    private volatile double measurementDrainDurationSeconds;
+    private volatile long measurementDrainMessagesSent;
+    private volatile long measurementDrainMessagesReceived;
+    private volatile long measurementDrainMessageSendErrors;
+    private volatile long measurementDrainInFlightSends;
+    private volatile long measurementDrainMessagesAcknowledged;
+    private volatile long measurementDrainAckErrors;
+    private volatile long measurementDrainAckInFlight;
+    private volatile boolean measurementDrainAcknowledgementTrackingSupported;
+    private volatile long measurementDrainBacklogMessages;
+    private volatile Long measurementDrainBrokerBacklogMessages;
+    private volatile int measurementDrainBrokerBacklogZeroPolls;
 
     private volatile double targetPublishRate;
 
@@ -164,6 +200,8 @@ public class WorkloadGenerator implements AutoCloseable {
             printAndCollectStats(workload.warmupDurationMinutes, TimeUnit.MINUTES);
         }
 
+        prepareMeasurementWindow();
+
         if (workload.consumerBacklogSizeGB > 0) {
             executor.execute(
                     () -> {
@@ -176,10 +214,11 @@ public class WorkloadGenerator implements AutoCloseable {
                     });
         }
 
-        worker.resetStats();
         log.info("----- Starting benchmark traffic ({}m)------", workload.testDurationMinutes);
 
         TestResult result = printAndCollectStats(workload.testDurationMinutes, TimeUnit.MINUTES);
+        completeMeasurementWindow();
+        collectAggregatedLatencies(result);
         if (workload.consumerBacklogSizeGB > 0) {
             backlogPhase = "COMPLETE";
         }
@@ -191,6 +230,39 @@ public class WorkloadGenerator implements AutoCloseable {
         result.payloadSeed = effectivePayload.seed;
         result.payloadSha256 = effectivePayload.expectedSha256;
         result.assignmentSha256 = assignmentSha256();
+        result.measurementStartedAt = measurementStartedAt;
+        result.measurementDurationSeconds = measurementDurationSeconds;
+        result.warmupDrainApplied = warmupDrainApplied;
+        result.warmupDrainDurationSeconds = warmupDrainDurationSeconds;
+        result.warmupDrainMessagesSent = warmupDrainMessagesSent;
+        result.warmupDrainMessagesReceived = warmupDrainMessagesReceived;
+        result.warmupDrainMessageSendErrors = warmupDrainMessageSendErrors;
+        result.warmupDrainInFlightSends = warmupDrainInFlightSends;
+        result.warmupDrainMessagesAcknowledged = warmupDrainMessagesAcknowledged;
+        result.warmupDrainAckErrors = warmupDrainAckErrors;
+        result.warmupDrainAckInFlight = warmupDrainAckInFlight;
+        result.warmupDrainAcknowledgementTrackingSupported =
+                warmupDrainAcknowledgementTrackingSupported;
+        result.warmupDrainBacklogMessages = warmupDrainBacklogMessages;
+        result.warmupDrainBrokerBacklogMessages = warmupDrainBrokerBacklogMessages;
+        result.warmupDrainBrokerBacklogZeroPolls = warmupDrainBrokerBacklogZeroPolls;
+        result.measurementEndedAt = measurementEndedAt;
+        result.measurementCompletedAt = measurementCompletedAt;
+        result.measurementDrainApplied = measurementDrainApplied;
+        result.measurementDrainDurationSeconds = measurementDrainDurationSeconds;
+        result.measurementDrainMessagesSent = measurementDrainMessagesSent;
+        result.measurementDrainMessagesReceived = measurementDrainMessagesReceived;
+        result.measurementDrainMessageSendErrors = measurementDrainMessageSendErrors;
+        result.measurementDrainInFlightSends = measurementDrainInFlightSends;
+        result.measurementDrainMessagesAcknowledged = measurementDrainMessagesAcknowledged;
+        result.measurementDrainAckErrors = measurementDrainAckErrors;
+        result.measurementDrainAckInFlight = measurementDrainAckInFlight;
+        result.measurementDrainAcknowledgementTrackingSupported =
+                measurementDrainAcknowledgementTrackingSupported;
+        result.measurementDrainBacklogMessages = measurementDrainBacklogMessages;
+        result.measurementDrainBrokerBacklogMessages = measurementDrainBrokerBacklogMessages;
+        result.measurementDrainBrokerBacklogZeroPolls = measurementDrainBrokerBacklogZeroPolls;
+        result.targetPublishRate = targetPublishRate;
         result.requestedBacklogBytes = requestedBacklogBytes;
         result.backlogAtDrainStartMessages = backlogAtDrainStartMessages;
         result.backlogBuildDurationSeconds = backlogBuildDurationSeconds;
@@ -207,6 +279,289 @@ public class WorkloadGenerator implements AutoCloseable {
         return result;
     }
 
+    void prepareMeasurementWindow() throws IOException {
+        if (workload.warmupDrainTimeoutSeconds == 0) {
+            worker.resetStats();
+            measurementStartedAt = Instant.now().toString();
+            measurementStartedAtNanos = System.nanoTime();
+            return;
+        }
+
+        warmupDrainApplied = true;
+        long startedAtNanos = System.nanoTime();
+        boolean boundaryPrepared = false;
+        try {
+            worker.pauseProducers();
+            drainBoundary(DrainBoundary.WARMUP, workload.warmupDrainTimeoutSeconds);
+            worker.resetStats();
+            measurementStartedAt = Instant.now().toString();
+            measurementStartedAtNanos = System.nanoTime();
+            worker.resumeProducers();
+            boundaryPrepared = true;
+            log.info(
+                    "Warm-up traffic drained in {} seconds; resetting measurement statistics",
+                    warmupDrainDurationSeconds);
+        } catch (InvalidBenchmarkRunException error) {
+            throw error;
+        } catch (IOException | RuntimeException error) {
+            throw new InvalidBenchmarkRunException(
+                    "failed to establish a clean pre-measurement boundary", error);
+        } finally {
+            if (!boundaryPrepared) {
+                warmupDrainDurationSeconds = (System.nanoTime() - startedAtNanos) / 1_000_000_000.0;
+                log.warn("Warm-up boundary failed; producers remain paused until worker shutdown");
+            }
+        }
+    }
+
+    void completeMeasurementWindow() throws IOException {
+        if (workload.measurementDrainTimeoutSeconds == 0) {
+            worker.pauseProducers();
+            markMeasurementEnded();
+            measurementCompletedAt = measurementEndedAt;
+            return;
+        }
+
+        measurementDrainApplied = true;
+        boolean boundaryCompleted = false;
+        try {
+            worker.pauseProducers();
+            markMeasurementEnded();
+            drainBoundary(DrainBoundary.MEASUREMENT, workload.measurementDrainTimeoutSeconds);
+            measurementCompletedAt = Instant.now().toString();
+            boundaryCompleted = true;
+            log.info("Measurement traffic drained in {} seconds", measurementDrainDurationSeconds);
+        } catch (InvalidBenchmarkRunException error) {
+            throw error;
+        } catch (IOException | RuntimeException error) {
+            throw new InvalidBenchmarkRunException(
+                    "failed to establish a clean final measurement boundary", error);
+        } finally {
+            if (!boundaryCompleted) {
+                log.warn("Measurement boundary failed; producers remain paused until worker shutdown");
+            }
+        }
+    }
+
+    private void markMeasurementEnded() {
+        measurementEndedAt = Instant.now().toString();
+        if (measurementStartedAtNanos != 0) {
+            measurementDurationSeconds =
+                    (System.nanoTime() - measurementStartedAtNanos) / 1_000_000_000.0;
+        }
+    }
+
+    private void drainBoundary(DrainBoundary boundary, int timeoutSeconds) throws IOException {
+        long startedAtNanos = System.nanoTime();
+        long deadlineNanos = startedAtNanos + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        int consecutiveBrokerBacklogZeroPolls = 0;
+        long nextLogNanos = startedAtNanos;
+        try {
+            while (true) {
+                CountersStats stats = worker.getCountersStats();
+                long expectedReceives =
+                        Math.multiplyExact(stats.messagesSent, (long) workload.subscriptionsPerTopic);
+                long backlog = Math.max(0, expectedReceives - stats.messagesReceived);
+                if (run != null && !stats.acknowledgementTrackingSupported) {
+                    recordDrainSnapshot(boundary, stats, backlog, null, 0);
+                    throw new InvalidBenchmarkRunException(
+                            boundary.label + " does not expose acknowledgement completion");
+                }
+                if (stats.messageSendErrors > 0 || stats.ackErrors > 0) {
+                    recordDrainSnapshot(boundary, stats, backlog, null, 0);
+                    throw new InvalidBenchmarkRunException(
+                            String.format(
+                                    "%s had sendErrors=%d and ackErrors=%d",
+                                    boundary.label, stats.messageSendErrors, stats.ackErrors));
+                }
+                if (stats.messagesReceived > expectedReceives) {
+                    recordDrainSnapshot(boundary, stats, backlog, null, 0);
+                    throw new InvalidBenchmarkRunException(
+                            String.format(
+                                    "%s received %d deliveries for %d expected messages; possible redelivery",
+                                    boundary.label, stats.messagesReceived, expectedReceives));
+                }
+                boolean acknowledgementsComplete =
+                        !stats.acknowledgementTrackingSupported
+                                || (stats.ackInFlight == 0 && stats.messagesAcknowledged == stats.messagesReceived);
+                if (stats.acknowledgementTrackingSupported
+                        && stats.ackInFlight == 0
+                        && stats.messagesAcknowledged != stats.messagesReceived) {
+                    recordDrainSnapshot(boundary, stats, backlog, null, 0);
+                    throw new InvalidBenchmarkRunException(
+                            String.format(
+                                    "%s has %d received messages but %d completed acknowledgements",
+                                    boundary.label, stats.messagesReceived, stats.messagesAcknowledged));
+                }
+
+                boolean localDrainComplete =
+                        stats.inFlightSends == 0 && backlog == 0 && acknowledgementsComplete;
+                Long brokerBacklog = null;
+                if (localDrainComplete) {
+                    brokerBacklog = readBrokerBacklog();
+                    if (brokerBacklog == null) {
+                        consecutiveBrokerBacklogZeroPolls = 0;
+                    } else if (brokerBacklog == 0) {
+                        consecutiveBrokerBacklogZeroPolls++;
+                    } else {
+                        consecutiveBrokerBacklogZeroPolls = 0;
+                    }
+                } else {
+                    consecutiveBrokerBacklogZeroPolls = 0;
+                }
+
+                recordDrainSnapshot(
+                        boundary, stats, backlog, brokerBacklog, consecutiveBrokerBacklogZeroPolls);
+
+                boolean brokerDrainComplete =
+                        brokerBacklog == null
+                                || consecutiveBrokerBacklogZeroPolls >= REQUIRED_BROKER_BACKLOG_ZERO_POLLS;
+                if (localDrainComplete && brokerDrainComplete) {
+                    break;
+                }
+
+                long now = System.nanoTime();
+                if (now >= deadlineNanos) {
+                    throw new InvalidBenchmarkRunException(
+                            String.format(
+                                    "timed out draining %s after %d seconds: sent=%d, received=%d, "
+                                            + "acknowledged=%d, sendErrors=%d, ackErrors=%d, "
+                                            + "sendInFlight=%d, ackInFlight=%d, backlog=%d, "
+                                            + "brokerBacklog=%s, brokerZeroPolls=%d",
+                                    boundary.label,
+                                    timeoutSeconds,
+                                    stats.messagesSent,
+                                    stats.messagesReceived,
+                                    stats.messagesAcknowledged,
+                                    stats.messageSendErrors,
+                                    stats.ackErrors,
+                                    stats.inFlightSends,
+                                    stats.ackInFlight,
+                                    backlog,
+                                    brokerBacklog,
+                                    consecutiveBrokerBacklogZeroPolls));
+                }
+                if (now >= nextLogNanos) {
+                    log.info(
+                            "Draining {} -- Sent: {}, Received: {}, Acknowledged: {}, "
+                                    + "Send errors: {}, Ack errors: {}, Send in-flight: {}, "
+                                    + "Ack in-flight: {}, Backlog: {}, Broker backlog: {}, "
+                                    + "Broker zero polls: {}/{}",
+                            boundary.label,
+                            stats.messagesSent,
+                            stats.messagesReceived,
+                            stats.messagesAcknowledged,
+                            stats.messageSendErrors,
+                            stats.ackErrors,
+                            stats.inFlightSends,
+                            stats.ackInFlight,
+                            backlog,
+                            brokerBacklog,
+                            consecutiveBrokerBacklogZeroPolls,
+                            REQUIRED_BROKER_BACKLOG_ZERO_POLLS);
+                    nextLogNanos = now + TimeUnit.SECONDS.toNanos(5);
+                }
+                try {
+                    Thread.sleep(localDrainComplete ? BROKER_BACKLOG_POLL_INTERVAL_MILLIS : 100);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("interrupted while draining " + boundary.label, error);
+                }
+            }
+        } finally {
+            double durationSeconds = (System.nanoTime() - startedAtNanos) / 1_000_000_000.0;
+            if (boundary == DrainBoundary.WARMUP) {
+                warmupDrainDurationSeconds = durationSeconds;
+            } else {
+                measurementDrainDurationSeconds = durationSeconds;
+            }
+        }
+    }
+
+    private void recordDrainSnapshot(
+            DrainBoundary boundary,
+            CountersStats stats,
+            long backlog,
+            Long brokerBacklog,
+            int brokerBacklogZeroPolls) {
+        if (boundary == DrainBoundary.WARMUP) {
+            warmupDrainMessagesSent = stats.messagesSent;
+            warmupDrainMessagesReceived = stats.messagesReceived;
+            warmupDrainMessageSendErrors = stats.messageSendErrors;
+            warmupDrainInFlightSends = stats.inFlightSends;
+            warmupDrainMessagesAcknowledged = stats.messagesAcknowledged;
+            warmupDrainAckErrors = stats.ackErrors;
+            warmupDrainAckInFlight = stats.ackInFlight;
+            warmupDrainAcknowledgementTrackingSupported = stats.acknowledgementTrackingSupported;
+            warmupDrainBacklogMessages = backlog;
+            warmupDrainBrokerBacklogMessages = brokerBacklog;
+            warmupDrainBrokerBacklogZeroPolls = brokerBacklogZeroPolls;
+            return;
+        }
+
+        measurementDrainMessagesSent = stats.messagesSent;
+        measurementDrainMessagesReceived = stats.messagesReceived;
+        measurementDrainMessageSendErrors = stats.messageSendErrors;
+        measurementDrainInFlightSends = stats.inFlightSends;
+        measurementDrainMessagesAcknowledged = stats.messagesAcknowledged;
+        measurementDrainAckErrors = stats.ackErrors;
+        measurementDrainAckInFlight = stats.ackInFlight;
+        measurementDrainAcknowledgementTrackingSupported = stats.acknowledgementTrackingSupported;
+        measurementDrainBacklogMessages = backlog;
+        measurementDrainBrokerBacklogMessages = brokerBacklog;
+        measurementDrainBrokerBacklogZeroPolls = brokerBacklogZeroPolls;
+    }
+
+    String getMeasurementStartedAt() {
+        return measurementStartedAt;
+    }
+
+    void copyBoundaryEvidenceTo(RunManifest manifest) {
+        manifest.measurementStartedAt = measurementStartedAt;
+        manifest.measurementDurationSeconds = measurementDurationSeconds;
+        manifest.warmupDrainApplied = warmupDrainApplied;
+        manifest.warmupDrainDurationSeconds = warmupDrainDurationSeconds;
+        manifest.warmupDrainMessagesSent = warmupDrainMessagesSent;
+        manifest.warmupDrainMessagesReceived = warmupDrainMessagesReceived;
+        manifest.warmupDrainMessageSendErrors = warmupDrainMessageSendErrors;
+        manifest.warmupDrainInFlightSends = warmupDrainInFlightSends;
+        manifest.warmupDrainMessagesAcknowledged = warmupDrainMessagesAcknowledged;
+        manifest.warmupDrainAckErrors = warmupDrainAckErrors;
+        manifest.warmupDrainAckInFlight = warmupDrainAckInFlight;
+        manifest.warmupDrainAcknowledgementTrackingSupported =
+                warmupDrainAcknowledgementTrackingSupported;
+        manifest.warmupDrainBacklogMessages = warmupDrainBacklogMessages;
+        manifest.warmupDrainBrokerBacklogMessages = warmupDrainBrokerBacklogMessages;
+        manifest.warmupDrainBrokerBacklogZeroPolls = warmupDrainBrokerBacklogZeroPolls;
+        manifest.measurementEndedAt = measurementEndedAt;
+        manifest.measurementCompletedAt = measurementCompletedAt;
+        manifest.measurementDrainApplied = measurementDrainApplied;
+        manifest.measurementDrainDurationSeconds = measurementDrainDurationSeconds;
+        manifest.measurementDrainMessagesSent = measurementDrainMessagesSent;
+        manifest.measurementDrainMessagesReceived = measurementDrainMessagesReceived;
+        manifest.measurementDrainMessageSendErrors = measurementDrainMessageSendErrors;
+        manifest.measurementDrainInFlightSends = measurementDrainInFlightSends;
+        manifest.measurementDrainMessagesAcknowledged = measurementDrainMessagesAcknowledged;
+        manifest.measurementDrainAckErrors = measurementDrainAckErrors;
+        manifest.measurementDrainAckInFlight = measurementDrainAckInFlight;
+        manifest.measurementDrainAcknowledgementTrackingSupported =
+                measurementDrainAcknowledgementTrackingSupported;
+        manifest.measurementDrainBacklogMessages = measurementDrainBacklogMessages;
+        manifest.measurementDrainBrokerBacklogMessages = measurementDrainBrokerBacklogMessages;
+        manifest.measurementDrainBrokerBacklogZeroPolls = measurementDrainBrokerBacklogZeroPolls;
+    }
+
+    private enum DrainBoundary {
+        WARMUP("pre-measurement traffic"),
+        MEASUREMENT("measurement traffic");
+
+        private final String label;
+
+        DrainBoundary(String label) {
+            this.label = label;
+        }
+    }
+
     private void ensureTopicsAreReady() throws IOException {
         log.info("Waiting for consumers to be ready");
         // This is work around the fact that there's no way to have a consumer ready in Kafka without
@@ -216,7 +571,11 @@ public class WorkloadGenerator implements AutoCloseable {
         int expectedMessages = workload.topics * workload.subscriptionsPerTopic;
 
         // In this case we just publish 1 message and then wait for consumers to receive the data
-        worker.probeProducers();
+        try {
+            worker.probeProducers();
+        } catch (IOException | RuntimeException error) {
+            throw new InvalidBenchmarkRunException("readiness probe send failed; run is invalid", error);
+        }
 
         long start = System.currentTimeMillis();
         long end = start + 60 * 1000;
@@ -239,7 +598,8 @@ public class WorkloadGenerator implements AutoCloseable {
         }
 
         if (System.currentTimeMillis() >= end) {
-            throw new RuntimeException("Timed out waiting for consumers to be ready");
+            throw new InvalidBenchmarkRunException(
+                    "Timed out waiting for consumers to be ready; run is invalid");
         } else {
             log.info("All consumers are ready");
         }
@@ -434,14 +794,14 @@ public class WorkloadGenerator implements AutoCloseable {
             if (backlog < 0) {
                 if (run != null) {
                     throw new IOException(
-                            "driver does not expose broker backlog for formal B1 run: "
+                            "driver does not expose broker backlog for formal run: "
                                     + target.topic
                                     + "/"
                                     + target.subscription);
                 }
                 return null;
             }
-            total += backlog;
+            total = Math.addExact(total, backlog);
         }
         return total;
     }
@@ -579,6 +939,9 @@ public class WorkloadGenerator implements AutoCloseable {
             sample.bytesSent = stats.bytesSent;
             sample.bytesReceived = stats.bytesReceived;
             sample.inFlightSends = stats.inFlightSends;
+            sample.messagesAcknowledged = stats.messagesAcknowledged;
+            sample.ackErrors = stats.ackErrors;
+            sample.ackInFlight = stats.ackInFlight;
             sample.backlog = currentBacklog;
             sample.publishRate = publishRate;
             sample.publishThroughputMiB = publishThroughput;
@@ -590,89 +953,6 @@ public class WorkloadGenerator implements AutoCloseable {
             result.samples.add(sample);
 
             if (now >= testEndTime && !needToWaitForBacklogDraining) {
-                CumulativeLatencies agg = worker.getCumulativeLatencies();
-                log.info(
-                        "----- Aggregated Pub Latency (ms) avg: {} - 50%: {} - 95%: {} - 99%: {} - 99.9%: {} - 99.99%: {} - Max: {} | Pub Delay (us)  avg: {} - 50%: {} - 95%: {} - 99%: {} - 99.9%: {} - 99.99%: {} - Max: {}",
-                        dec.format(agg.publishLatency.getMean() / 1000.0),
-                        dec.format(agg.publishLatency.getValueAtPercentile(50) / 1000.0),
-                        dec.format(agg.publishLatency.getValueAtPercentile(95) / 1000.0),
-                        dec.format(agg.publishLatency.getValueAtPercentile(99) / 1000.0),
-                        dec.format(agg.publishLatency.getValueAtPercentile(99.9) / 1000.0),
-                        dec.format(agg.publishLatency.getValueAtPercentile(99.99) / 1000.0),
-                        throughputFormat.format(agg.publishLatency.getMaxValue() / 1000.0),
-                        dec.format(agg.publishDelayLatency.getMean()),
-                        dec.format(agg.publishDelayLatency.getValueAtPercentile(50)),
-                        dec.format(agg.publishDelayLatency.getValueAtPercentile(95)),
-                        dec.format(agg.publishDelayLatency.getValueAtPercentile(99)),
-                        dec.format(agg.publishDelayLatency.getValueAtPercentile(99.9)),
-                        dec.format(agg.publishDelayLatency.getValueAtPercentile(99.99)),
-                        throughputFormat.format(agg.publishDelayLatency.getMaxValue()));
-
-                result.aggregatedPublishLatencyAvg = agg.publishLatency.getMean() / 1000.0;
-                result.aggregatedPublishLatency50pct = agg.publishLatency.getValueAtPercentile(50) / 1000.0;
-                result.aggregatedPublishLatency75pct = agg.publishLatency.getValueAtPercentile(75) / 1000.0;
-                result.aggregatedPublishLatency95pct = agg.publishLatency.getValueAtPercentile(95) / 1000.0;
-                result.aggregatedPublishLatency99pct = agg.publishLatency.getValueAtPercentile(99) / 1000.0;
-                result.aggregatedPublishLatency999pct =
-                        agg.publishLatency.getValueAtPercentile(99.9) / 1000.0;
-                result.aggregatedPublishLatency9999pct =
-                        agg.publishLatency.getValueAtPercentile(99.99) / 1000.0;
-                result.aggregatedPublishLatencyMax = agg.publishLatency.getMaxValue() / 1000.0;
-
-                result.aggregatedPublishDelayLatencyAvg = agg.publishDelayLatency.getMean();
-                result.aggregatedPublishDelayLatency50pct =
-                        agg.publishDelayLatency.getValueAtPercentile(50);
-                result.aggregatedPublishDelayLatency75pct =
-                        agg.publishDelayLatency.getValueAtPercentile(75);
-                result.aggregatedPublishDelayLatency95pct =
-                        agg.publishDelayLatency.getValueAtPercentile(95);
-                result.aggregatedPublishDelayLatency99pct =
-                        agg.publishDelayLatency.getValueAtPercentile(99);
-                result.aggregatedPublishDelayLatency999pct =
-                        agg.publishDelayLatency.getValueAtPercentile(99.9);
-                result.aggregatedPublishDelayLatency9999pct =
-                        agg.publishDelayLatency.getValueAtPercentile(99.99);
-                result.aggregatedPublishDelayLatencyMax = agg.publishDelayLatency.getMaxValue();
-
-                result.aggregatedEndToEndLatencyAvg = agg.endToEndLatency.getMean() / 1000.0;
-                result.aggregatedEndToEndLatency50pct =
-                        agg.endToEndLatency.getValueAtPercentile(50) / 1000.0;
-                result.aggregatedEndToEndLatency75pct =
-                        agg.endToEndLatency.getValueAtPercentile(75) / 1000.0;
-                result.aggregatedEndToEndLatency95pct =
-                        agg.endToEndLatency.getValueAtPercentile(95) / 1000.0;
-                result.aggregatedEndToEndLatency99pct =
-                        agg.endToEndLatency.getValueAtPercentile(99) / 1000.0;
-                result.aggregatedEndToEndLatency999pct =
-                        agg.endToEndLatency.getValueAtPercentile(99.9) / 1000.0;
-                result.aggregatedEndToEndLatency9999pct =
-                        agg.endToEndLatency.getValueAtPercentile(99.99) / 1000.0;
-                result.aggregatedEndToEndLatencyMax = agg.endToEndLatency.getMaxValue() / 1000.0;
-
-                agg.publishLatency
-                        .percentiles(100)
-                        .forEach(
-                                value -> {
-                                    result.aggregatedPublishLatencyQuantiles.put(
-                                            value.getPercentile(), value.getValueIteratedTo() / 1000.0);
-                                });
-
-                agg.publishDelayLatency
-                        .percentiles(100)
-                        .forEach(
-                                value -> {
-                                    result.aggregatedPublishDelayLatencyQuantiles.put(
-                                            value.getPercentile(), value.getValueIteratedTo());
-                                });
-
-                agg.endToEndLatency
-                        .percentiles(100)
-                        .forEach(
-                                value -> {
-                                    result.aggregatedEndToEndLatencyQuantiles.put(
-                                            value.getPercentile(), microsToMillis(value.getValueIteratedTo()));
-                                });
-
                 break;
             }
 
@@ -680,6 +960,94 @@ public class WorkloadGenerator implements AutoCloseable {
         }
 
         return result;
+    }
+
+    @SuppressWarnings({"checkstyle:LineLength", "checkstyle:MethodLength"})
+    private void collectAggregatedLatencies(TestResult result) throws IOException {
+        CumulativeLatencies aggregated = worker.getCumulativeLatencies();
+        log.info(
+                "----- Aggregated Pub Latency (ms) avg: {} - 50%: {} - 95%: {} - 99%: {} - 99.9%: {} - 99.99%: {} - Max: {} | Pub Delay (us)  avg: {} - 50%: {} - 95%: {} - 99%: {} - 99.9%: {} - 99.99%: {} - Max: {}",
+                dec.format(aggregated.publishLatency.getMean() / 1000.0),
+                dec.format(aggregated.publishLatency.getValueAtPercentile(50) / 1000.0),
+                dec.format(aggregated.publishLatency.getValueAtPercentile(95) / 1000.0),
+                dec.format(aggregated.publishLatency.getValueAtPercentile(99) / 1000.0),
+                dec.format(aggregated.publishLatency.getValueAtPercentile(99.9) / 1000.0),
+                dec.format(aggregated.publishLatency.getValueAtPercentile(99.99) / 1000.0),
+                throughputFormat.format(aggregated.publishLatency.getMaxValue() / 1000.0),
+                dec.format(aggregated.publishDelayLatency.getMean()),
+                dec.format(aggregated.publishDelayLatency.getValueAtPercentile(50)),
+                dec.format(aggregated.publishDelayLatency.getValueAtPercentile(95)),
+                dec.format(aggregated.publishDelayLatency.getValueAtPercentile(99)),
+                dec.format(aggregated.publishDelayLatency.getValueAtPercentile(99.9)),
+                dec.format(aggregated.publishDelayLatency.getValueAtPercentile(99.99)),
+                throughputFormat.format(aggregated.publishDelayLatency.getMaxValue()));
+
+        result.aggregatedPublishLatencyAvg = aggregated.publishLatency.getMean() / 1000.0;
+        result.aggregatedPublishLatency50pct =
+                aggregated.publishLatency.getValueAtPercentile(50) / 1000.0;
+        result.aggregatedPublishLatency75pct =
+                aggregated.publishLatency.getValueAtPercentile(75) / 1000.0;
+        result.aggregatedPublishLatency95pct =
+                aggregated.publishLatency.getValueAtPercentile(95) / 1000.0;
+        result.aggregatedPublishLatency99pct =
+                aggregated.publishLatency.getValueAtPercentile(99) / 1000.0;
+        result.aggregatedPublishLatency999pct =
+                aggregated.publishLatency.getValueAtPercentile(99.9) / 1000.0;
+        result.aggregatedPublishLatency9999pct =
+                aggregated.publishLatency.getValueAtPercentile(99.99) / 1000.0;
+        result.aggregatedPublishLatencyMax = aggregated.publishLatency.getMaxValue() / 1000.0;
+
+        result.aggregatedPublishDelayLatencyAvg = aggregated.publishDelayLatency.getMean();
+        result.aggregatedPublishDelayLatency50pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(50);
+        result.aggregatedPublishDelayLatency75pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(75);
+        result.aggregatedPublishDelayLatency95pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(95);
+        result.aggregatedPublishDelayLatency99pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(99);
+        result.aggregatedPublishDelayLatency999pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(99.9);
+        result.aggregatedPublishDelayLatency9999pct =
+                aggregated.publishDelayLatency.getValueAtPercentile(99.99);
+        result.aggregatedPublishDelayLatencyMax = aggregated.publishDelayLatency.getMaxValue();
+
+        result.aggregatedEndToEndLatencyAvg = aggregated.endToEndLatency.getMean() / 1000.0;
+        result.aggregatedEndToEndLatency50pct =
+                aggregated.endToEndLatency.getValueAtPercentile(50) / 1000.0;
+        result.aggregatedEndToEndLatency75pct =
+                aggregated.endToEndLatency.getValueAtPercentile(75) / 1000.0;
+        result.aggregatedEndToEndLatency95pct =
+                aggregated.endToEndLatency.getValueAtPercentile(95) / 1000.0;
+        result.aggregatedEndToEndLatency99pct =
+                aggregated.endToEndLatency.getValueAtPercentile(99) / 1000.0;
+        result.aggregatedEndToEndLatency999pct =
+                aggregated.endToEndLatency.getValueAtPercentile(99.9) / 1000.0;
+        result.aggregatedEndToEndLatency9999pct =
+                aggregated.endToEndLatency.getValueAtPercentile(99.99) / 1000.0;
+        result.aggregatedEndToEndLatencyMax = aggregated.endToEndLatency.getMaxValue() / 1000.0;
+
+        aggregated
+                .publishLatency
+                .percentiles(100)
+                .forEach(
+                        value ->
+                                result.aggregatedPublishLatencyQuantiles.put(
+                                        value.getPercentile(), value.getValueIteratedTo() / 1000.0));
+        aggregated
+                .publishDelayLatency
+                .percentiles(100)
+                .forEach(
+                        value ->
+                                result.aggregatedPublishDelayLatencyQuantiles.put(
+                                        value.getPercentile(), value.getValueIteratedTo()));
+        aggregated
+                .endToEndLatency
+                .percentiles(100)
+                .forEach(
+                        value ->
+                                result.aggregatedEndToEndLatencyQuantiles.put(
+                                        value.getPercentile(), microsToMillis(value.getValueIteratedTo())));
     }
 
     private static final DecimalFormat rateFormat = new PaddingDecimalFormat("0.0", 7);
@@ -710,6 +1078,11 @@ public class WorkloadGenerator implements AutoCloseable {
         }
         if (!run.stage.matches("[ABCDE]") || run.runId.matches(".*[^A-Za-z0-9._-].*")) {
             throw new IllegalArgumentException("invalid formal run stage or runId");
+        }
+        if (workload.warmupDrainTimeoutSeconds <= 0 || workload.measurementDrainTimeoutSeconds <= 0) {
+            throw new IllegalArgumentException(
+                    "formal runs require warmupDrainTimeoutSeconds and "
+                            + "measurementDrainTimeoutSeconds > 0");
         }
     }
 

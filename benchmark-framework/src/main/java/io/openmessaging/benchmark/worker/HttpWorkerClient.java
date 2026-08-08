@@ -22,10 +22,12 @@ import static io.openmessaging.benchmark.worker.WorkerHandler.CUMULATIVE_LATENCI
 import static io.openmessaging.benchmark.worker.WorkerHandler.DRIVER_RUNTIME_INFO;
 import static io.openmessaging.benchmark.worker.WorkerHandler.INITIALIZE_DRIVER;
 import static io.openmessaging.benchmark.worker.WorkerHandler.PAUSE_CONSUMERS;
+import static io.openmessaging.benchmark.worker.WorkerHandler.PAUSE_PRODUCERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.PERIOD_STATS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.PROBE_PRODUCERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.RESET_STATS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.RESUME_CONSUMERS;
+import static io.openmessaging.benchmark.worker.WorkerHandler.RESUME_PRODUCERS;
 import static io.openmessaging.benchmark.worker.WorkerHandler.START_LOAD;
 import static io.openmessaging.benchmark.worker.WorkerHandler.STOP_ALL;
 import static io.openmessaging.benchmark.worker.WorkerHandler.SUBSCRIPTION_BACKLOG;
@@ -128,6 +130,16 @@ public class HttpWorkerClient implements Worker {
     public void adjustPublishRate(double publishRate) throws IOException {
         log.debug("Adjusting worker publish rate to {} msgs/sec", publishRate);
         sendPost(ADJUST_PUBLISH_RATE, writer.writeValueAsBytes(publishRate));
+    }
+
+    @Override
+    public void pauseProducers() throws IOException {
+        sendPost(PAUSE_PRODUCERS);
+    }
+
+    @Override
+    public void resumeProducers() throws IOException {
+        sendPost(RESUME_PRODUCERS);
     }
 
     @Override

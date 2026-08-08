@@ -25,6 +25,9 @@ public class PeriodSample {
     public long bytesSent;
     public long bytesReceived;
     public long inFlightSends;
+    public long messagesAcknowledged;
+    public long ackErrors;
+    public long ackInFlight;
     public long backlog;
     public double publishRate;
     public double publishThroughputMiB;

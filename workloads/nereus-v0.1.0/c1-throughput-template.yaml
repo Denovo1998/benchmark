@@ -25,5 +25,7 @@ consumerPerSubscription: 4
 producerRate: 100000
 consumerBacklogSizeGB: 0
 warmupDurationMinutes: 5
+warmupDrainTimeoutSeconds: 300
+measurementDrainTimeoutSeconds: 300
 testDurationMinutes: 15
 statsIntervalSeconds: 1

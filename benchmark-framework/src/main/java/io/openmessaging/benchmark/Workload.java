@@ -66,6 +66,15 @@ public class Workload {
 
     public int warmupDurationMinutes = 1;
 
+    /**
+     * Maximum time to pause producers and drain warm-up traffic before resetting measurement
+     * statistics. A value of {@code 0} keeps the legacy continuous warm-up transition.
+     */
+    public int warmupDrainTimeoutSeconds = 0;
+
+    /** Maximum time to drain all sends and acknowledgements after the measurement window. */
+    public int measurementDrainTimeoutSeconds = 0;
+
     /** Sampling interval used by the run manifest and result samples. */
     public int statsIntervalSeconds = 10;
 
@@ -108,7 +117,11 @@ public class Workload {
         if (subscriptionsPerTopic <= 0 || producersPerTopic <= 0 || consumerPerSubscription <= 0) {
             throw new IllegalArgumentException("producer and consumer counts must be positive");
         }
-        if (producerRate < 0 || testDurationMinutes < 0 || warmupDurationMinutes < 0) {
+        if (producerRate < 0
+                || testDurationMinutes < 0
+                || warmupDurationMinutes < 0
+                || warmupDrainTimeoutSeconds < 0
+                || measurementDrainTimeoutSeconds < 0) {
             throw new IllegalArgumentException("durations and producerRate must not be negative");
         }
         if (statsIntervalSeconds <= 0) {

@@ -26,10 +26,16 @@ public class PeriodStats {
     public long messagesReceived = 0;
     public long bytesReceived = 0;
     public long inFlightSends = 0;
+    public long messagesAcknowledged = 0;
+    public long ackErrors = 0;
+    public long ackInFlight = 0;
+    public boolean acknowledgementTrackingSupported = false;
 
     public long totalMessagesSent = 0;
     public long totalMessageSendErrors = 0;
     public long totalMessagesReceived = 0;
+    public long totalMessagesAcknowledged = 0;
+    public long totalAckErrors = 0;
 
     public Histogram publishLatency = new Histogram(SECONDS.toMicros(60), 5);
     public Histogram publishDelayLatency = new Histogram(SECONDS.toMicros(60), 5);
@@ -44,9 +50,15 @@ public class PeriodStats {
         result.messagesReceived += this.messagesReceived;
         result.bytesReceived += this.bytesReceived;
         result.inFlightSends = this.inFlightSends;
+        result.messagesAcknowledged += this.messagesAcknowledged;
+        result.ackErrors += this.ackErrors;
+        result.ackInFlight = this.ackInFlight;
+        result.acknowledgementTrackingSupported |= this.acknowledgementTrackingSupported;
         result.totalMessagesSent += this.totalMessagesSent;
         result.totalMessageSendErrors += this.totalMessageSendErrors;
         result.totalMessagesReceived += this.totalMessagesReceived;
+        result.totalMessagesAcknowledged += this.totalMessagesAcknowledged;
+        result.totalAckErrors += this.totalAckErrors;
         result.publishLatency.add(this.publishLatency);
         result.publishDelayLatency.add(this.publishDelayLatency);
         result.endToEndLatency.add(this.endToEndLatency);
@@ -57,9 +69,15 @@ public class PeriodStats {
         result.messagesReceived += toAdd.messagesReceived;
         result.bytesReceived += toAdd.bytesReceived;
         result.inFlightSends += toAdd.inFlightSends;
+        result.messagesAcknowledged += toAdd.messagesAcknowledged;
+        result.ackErrors += toAdd.ackErrors;
+        result.ackInFlight += toAdd.ackInFlight;
+        result.acknowledgementTrackingSupported |= toAdd.acknowledgementTrackingSupported;
         result.totalMessagesSent += toAdd.totalMessagesSent;
         result.totalMessageSendErrors += toAdd.totalMessageSendErrors;
         result.totalMessagesReceived += toAdd.totalMessagesReceived;
+        result.totalMessagesAcknowledged += toAdd.totalMessagesAcknowledged;
+        result.totalAckErrors += toAdd.totalAckErrors;
         result.publishLatency.add(toAdd.publishLatency);
         result.publishDelayLatency.add(toAdd.publishDelayLatency);
         result.endToEndLatency.add(toAdd.endToEndLatency);
