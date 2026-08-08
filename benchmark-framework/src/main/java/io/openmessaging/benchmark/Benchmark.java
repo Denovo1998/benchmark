@@ -379,7 +379,11 @@ public class Benchmark {
         manifest.pulsarCluster = firstEnvironment("OMB_PULSAR_CLUSTER");
         manifest.pulsarStage = firstEnvironment("OMB_PULSAR_STAGE");
         manifest.brokerImageId = firstEnvironment("OMB_PULSAR_BROKER_IMAGE_ID");
-        manifest.nereusSourceIdentity = firstEnvironment("OMB_NEREUS_SOURCE_ID");
+        // Stage A deliberately exports an empty Nereus identity because it runs
+        // the Apache baseline broker. Preserve that distinction from an unset
+        // environment variable so the manifest records an empty string rather
+        // than JSON null.
+        manifest.nereusSourceIdentity = System.getenv("OMB_NEREUS_SOURCE_ID");
 
         String deploymentRunEnv = firstEnvironment("OMB_DEPLOYMENT_RUN_ENV", "NEREUS_RUN_ENV");
         if (deploymentRunEnv != null) {
